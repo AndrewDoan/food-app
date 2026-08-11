@@ -1,0 +1,13 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+::selection {
+  background-color: theme("colors.herb.600");
+  color: theme("colors.table.50");
+}
+
+:focus-visible {
+  outline: 2px solid theme("colors.herb.400");
+  outline-offset: 2px;
+}
