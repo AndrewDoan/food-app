@@ -85,10 +85,60 @@ create table if not exists public.recipes (
   ingredients jsonb not null default '[]', -- [{ "name": "...", "amount": "...", "unit": "..." }]
   steps jsonb not null default '[]',       -- ["Step one...", "Step two..."]
   photo_url text,
+  tags text[] not null default '{}',       -- e.g. {"weeknight", "vegetarian", "dessert"} -- for browse/search, not a feed
+  prep_time_minutes integer,
+  servings integer,
+  notes text,                              -- free-text extras from the creator (substitutions, tips, "my mom's version," etc.)
   created_at timestamptz not null default now()
 );
 
 create index if not exists idx_recipes_author on public.recipes(author_id);
+
+-- ---------------------------------------------------------------------
+-- 3b. RESTAURANT REVIEWS
+--     No separate "restaurants" directory table for v1 -- each review
+--     just stores its own place info. Two friends reviewing the same
+--     physical restaurant creates two rows; deduping via a shared
+--     places-id is a fine future enhancement, not needed for v1.
+--     latitude/longitude are plain floats for now -- swap to PostGIS's
+--     geography type later if/when doing real radius search at scale.
+-- ---------------------------------------------------------------------
+create table if not exists public.restaurant_reviews (
+  id uuid primary key default gen_random_uuid(),
+  author_id uuid not null references public.users(id) on delete cascade,
+  restaurant_name text not null,
+  address text,
+  latitude double precision not null,
+  longitude double precision not null,
+  rating smallint not null check (rating between 1 and 5),
+  notes text,
+  created_at timestamptz not null default now()
+);
+
+create index if not exists idx_reviews_author on public.restaurant_reviews(author_id);
+-- Speeds up "reviews near this lat/long" once that query gets built.
+create index if not exists idx_reviews_location on public.restaurant_reviews(latitude, longitude);
+
+alter table public.restaurant_reviews enable row level security;
+
+grant select, insert, update, delete on public.restaurant_reviews to authenticated;
+
+-- Same rule as recipes: your own reviews, or an accepted friend's.
+create policy "view own or friends reviews"
+  on public.restaurant_reviews for select
+  using (author_id = auth.uid() or public.is_friend(auth.uid(), author_id));
+
+create policy "insert own reviews"
+  on public.restaurant_reviews for insert
+  with check (author_id = auth.uid());
+
+create policy "update own reviews"
+  on public.restaurant_reviews for update
+  using (author_id = auth.uid());
+
+create policy "delete own reviews"
+  on public.restaurant_reviews for delete
+  using (author_id = auth.uid());
 
 -- ---------------------------------------------------------------------
 -- 4. ROW LEVEL SECURITY -- this is the "no strangers" guarantee.
@@ -152,39 +202,4 @@ create policy "update own recipes"
 
 create policy "delete own recipes"
   on public.recipes for delete
-  using (author_id = auth.uid());
-
-create table if not exists public.restaurant_reviews (
-  id uuid primary key default gen_random_uuid(),
-  author_id uuid not null references public.users(id) on delete cascade,
-  restaurant_name text not null,
-  address text,
-  latitude double precision not null,
-  longitude double precision not null,
-  rating smallint not null check (rating between 1 and 5),
-  notes text,
-  created_at timestamptz not null default now()
-);
-
-create index if not exists idx_reviews_author on public.restaurant_reviews(author_id);
-create index if not exists idx_reviews_location on public.restaurant_reviews(latitude, longitude);
-
-alter table public.restaurant_reviews enable row level security;
-
-grant select, insert, update, delete on public.restaurant_reviews to authenticated;
-
-create policy "view own or friends reviews"
-  on public.restaurant_reviews for select
-  using (author_id = auth.uid() or public.is_friend(auth.uid(), author_id));
-
-create policy "insert own reviews"
-  on public.restaurant_reviews for insert
-  with check (author_id = auth.uid());
-
-create policy "update own reviews"
-  on public.restaurant_reviews for update
-  using (author_id = auth.uid());
-
-create policy "delete own reviews"
-  on public.restaurant_reviews for delete
   using (author_id = auth.uid());
