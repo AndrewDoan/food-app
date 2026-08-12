@@ -12,6 +12,7 @@ export default function NewRecipePage() {
 
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
+  const [photoFile, setPhotoFile] = useState<File | null>(null);
   const [ingredients, setIngredients] = useState<Ingredient[]>([
     { name: "", amount: "", unit: "" },
   ]);
@@ -43,12 +44,29 @@ export default function NewRecipePage() {
       return;
     }
 
+    let photoPath: string | null = null;
+    if (photoFile) {
+      const ext = photoFile.name.split(".").pop();
+      const path = `${user.id}/${crypto.randomUUID()}.${ext}`;
+      const { error: uploadError } = await supabase.storage
+        .from("recipe-photos")
+        .upload(path, photoFile);
+
+      if (uploadError) {
+        setError(`Photo upload failed: ${uploadError.message}`);
+        setSaving(false);
+        return;
+      }
+      photoPath = path;
+    }
+
     const { error: insertError } = await supabase.from("recipes").insert({
       author_id: user.id,
       title,
       description,
       ingredients: ingredients.filter((i) => i.name.trim()),
       steps: steps.filter((s) => s.trim()),
+      photo_url: photoPath,
     });
 
     setSaving(false);
@@ -83,6 +101,18 @@ export default function NewRecipePage() {
             onChange={(e) => setDescription(e.target.value)}
             rows={2}
             className="w-full rounded-md bg-table-900 border border-table-700 px-3 py-2 focus:border-herb-500"
+          />
+        </div>
+
+        <div>
+          <label className="block text-sm text-table-400 mb-1">
+            Photo (optional)
+          </label>
+          <input
+            type="file"
+            accept="image/*"
+            onChange={(e) => setPhotoFile(e.target.files?.[0] ?? null)}
+            className="w-full text-sm text-table-400 file:mr-3 file:rounded-md file:border-0 file:bg-table-800 file:px-3 file:py-1.5 file:text-table-100 file:text-sm"
           />
         </div>
 
