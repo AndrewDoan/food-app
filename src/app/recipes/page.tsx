@@ -16,17 +16,20 @@ export default async function RecipesPage() {
     <main className="max-w-2xl mx-auto px-6 py-12">
       <div className="flex items-center justify-between mb-8">
         <h1 className="font-display text-3xl">Table</h1>
-        <div className="flex gap-4 text-sm">
-          <Link href="/friends" className="text-table-400 hover:text-table-100">
-            Friends
-          </Link>
-          <Link
-            href="/recipes/new"
-            className="text-herb-400 hover:text-herb-300 font-medium"
-          >
-            + New recipe
-          </Link>
-        </div>
+          <div className="flex gap-4 text-sm">
+            <Link href="/profile" className="text-table-400 hover:text-table-100">
+              Profile
+            </Link>
+            <Link href="/friends" className="text-table-400 hover:text-table-100">
+              Friends
+            </Link>
+            <Link
+              href="/recipes/new"
+              className="text-herb-400 hover:text-herb-300 font-medium"
+            >
+              + New recipe
+            </Link>
+          </div>
       </div>
 
       {!recipes || recipes.length === 0 ? (
