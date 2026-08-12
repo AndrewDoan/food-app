@@ -43,6 +43,12 @@ export default async function RecipesPage() {
             Friends
           </Link>
           <Link
+            href="/reviews/new"
+            className="text-herb-400 hover:text-herb-300 font-medium"
+          >
+            + New review
+          </Link>
+          <Link
             href="/recipes/new"
             className="text-herb-400 hover:text-herb-300 font-medium"
           >
