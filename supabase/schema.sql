@@ -61,6 +61,19 @@ returns boolean as $$
   );
 $$ language sql stable security definer;
 
+-- Helper: look up a user's id by their invite code, WITHOUT requiring the
+-- caller to already have SELECT access to that user's row via RLS. This
+-- is what makes "add a friend by code" possible at all -- normal RLS on
+-- `users` only allows seeing yourself or existing friends, which is a
+-- chicken-and-egg problem for someone you're not friends with *yet*.
+-- Only the matching id is ever returned -- no other profile data leaks.
+create or replace function public.find_user_by_invite_code(code text)
+returns uuid as $$
+  select id from public.users where invite_code = code;
+$$ language sql stable security definer;
+
+grant execute on function public.find_user_by_invite_code(text) to authenticated;
+
 -- ---------------------------------------------------------------------
 -- 3. RECIPES
 -- ---------------------------------------------------------------------
@@ -85,6 +98,15 @@ create index if not exists idx_recipes_author on public.recipes(author_id);
 alter table public.users enable row level security;
 alter table public.friendships enable row level security;
 alter table public.recipes enable row level security;
+
+-- RLS policies control WHICH rows a query can see, but Postgres also
+-- requires this separate, more basic grant before RLS even applies.
+-- Without it, every query fails with "permission denied for table X"
+-- regardless of how correct the policies below are.
+grant usage on schema public to authenticated, anon;
+grant select, insert, update, delete on public.users to authenticated;
+grant select, insert, update, delete on public.friendships to authenticated;
+grant select, insert, update, delete on public.recipes to authenticated;
 
 -- USERS: you can see your own row, and the row of anyone you're friends
 -- with (needed to render their name/avatar on shared recipes).
