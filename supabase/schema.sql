@@ -153,3 +153,38 @@ create policy "update own recipes"
 create policy "delete own recipes"
   on public.recipes for delete
   using (author_id = auth.uid());
+
+create table if not exists public.restaurant_reviews (
+  id uuid primary key default gen_random_uuid(),
+  author_id uuid not null references public.users(id) on delete cascade,
+  restaurant_name text not null,
+  address text,
+  latitude double precision not null,
+  longitude double precision not null,
+  rating smallint not null check (rating between 1 and 5),
+  notes text,
+  created_at timestamptz not null default now()
+);
+
+create index if not exists idx_reviews_author on public.restaurant_reviews(author_id);
+create index if not exists idx_reviews_location on public.restaurant_reviews(latitude, longitude);
+
+alter table public.restaurant_reviews enable row level security;
+
+grant select, insert, update, delete on public.restaurant_reviews to authenticated;
+
+create policy "view own or friends reviews"
+  on public.restaurant_reviews for select
+  using (author_id = auth.uid() or public.is_friend(auth.uid(), author_id));
+
+create policy "insert own reviews"
+  on public.restaurant_reviews for insert
+  with check (author_id = auth.uid());
+
+create policy "update own reviews"
+  on public.restaurant_reviews for update
+  using (author_id = auth.uid());
+
+create policy "delete own reviews"
+  on public.restaurant_reviews for delete
+  using (author_id = auth.uid());

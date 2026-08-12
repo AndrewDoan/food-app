@@ -1,15 +1,22 @@
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
+import DeleteRecipeButton from "./DeleteRecipeButton";
 
 export default async function RecipesPage() {
   const supabase = createClient();
+
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
 
   // No manual "friends only" filter needed here -- RLS on the recipes
   // table already guarantees this query can only ever return the
   // user's own recipes plus their accepted friends' recipes.
   const { data: recipes } = await supabase
     .from("recipes")
-    .select("id, title, description, photo_url, created_at, author:author_id(display_name)")
+    .select(
+      "id, author_id, title, description, photo_url, created_at, author:author_id(display_name)"
+    )
     .order("created_at", { ascending: false });
 
   // photo_url stores a private storage path, not a public link -- generate
@@ -64,10 +71,17 @@ export default async function RecipesPage() {
                 />
               )}
               <div className="p-5">
-                <p className="text-xs text-table-500 mb-1">
-                  {r.author?.display_name ?? "Someone"}
-                </p>
-                <h2 className="font-display text-xl mb-1">{r.title}</h2>
+                <div className="flex items-start justify-between gap-2">
+                  <div>
+                    <p className="text-xs text-table-500 mb-1">
+                      {r.author?.display_name ?? "Someone"}
+                    </p>
+                    <h2 className="font-display text-xl mb-1">{r.title}</h2>
+                  </div>
+                  {r.author_id === user?.id && (
+                    <DeleteRecipeButton recipeId={r.id} photoPath={r.photo_url} />
+                  )}
+                </div>
                 {r.description && (
                   <p className="text-table-400 text-sm">{r.description}</p>
                 )}
