@@ -75,6 +75,41 @@ $$ language sql stable security definer;
 grant execute on function public.find_user_by_invite_code(text) to authenticated;
 
 -- ---------------------------------------------------------------------
+-- 3a. RECIPE GROUPS  (optional, user-defined collections -- "Sunday
+--     dinners," "Quick lunches," etc. A recipe belongs to at most one
+--     group; ungrouped is fine, nothing forces organizing.)
+-- ---------------------------------------------------------------------
+create table if not exists public.recipe_groups (
+  id uuid primary key default gen_random_uuid(),
+  owner_id uuid not null references public.users(id) on delete cascade,
+  name text not null,
+  created_at timestamptz not null default now()
+);
+
+create index if not exists idx_recipe_groups_owner on public.recipe_groups(owner_id);
+
+alter table public.recipe_groups enable row level security;
+grant select, insert, update, delete on public.recipe_groups to authenticated;
+
+-- Same friends-only rule as everything else: your own groups, or a
+-- friend's, so you can browse how they've organized their recipes.
+create policy "view own or friends recipe groups"
+  on public.recipe_groups for select
+  using (owner_id = auth.uid() or public.is_friend(auth.uid(), owner_id));
+
+create policy "insert own recipe groups"
+  on public.recipe_groups for insert
+  with check (owner_id = auth.uid());
+
+create policy "update own recipe groups"
+  on public.recipe_groups for update
+  using (owner_id = auth.uid());
+
+create policy "delete own recipe groups"
+  on public.recipe_groups for delete
+  using (owner_id = auth.uid());
+
+-- ---------------------------------------------------------------------
 -- 3. RECIPES
 -- ---------------------------------------------------------------------
 create table if not exists public.recipes (
@@ -89,10 +124,14 @@ create table if not exists public.recipes (
   prep_time_minutes integer,
   servings integer,
   notes text,                              -- free-text extras from the creator (substitutions, tips, "my mom's version," etc.)
+  -- Optional: which of the author's own groups this belongs to. Nullable
+  -- on purpose -- ungrouped recipes are completely fine.
+  group_id uuid references public.recipe_groups(id) on delete set null,
   created_at timestamptz not null default now()
 );
 
 create index if not exists idx_recipes_author on public.recipes(author_id);
+create index if not exists idx_recipes_group on public.recipes(group_id);
 
 -- ---------------------------------------------------------------------
 -- 3b. RESTAURANT REVIEWS
@@ -157,6 +196,7 @@ grant usage on schema public to authenticated, anon;
 grant select, insert, update, delete on public.users to authenticated;
 grant select, insert, update, delete on public.friendships to authenticated;
 grant select, insert, update, delete on public.recipes to authenticated;
+grant select, insert, update, delete on public.recipe_groups to authenticated;
 
 -- USERS: you can see your own row, and the row of anyone you're friends
 -- with (needed to render their name/avatar on shared recipes).
