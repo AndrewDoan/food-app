@@ -74,258 +74,15 @@ $$ language sql stable security definer;
 
 grant execute on function public.find_user_by_invite_code(text) to authenticated;
 
--- ---------------------------------------------------------------------
--- 3a. LISTS  (optional, user-defined collections -- "Sunday
---     dinners," "Quick lunches," etc. A recipe belongs to at most one
---     list; being on no list is fine, nothing forces organizing.)
--- ---------------------------------------------------------------------
-create table if not exists public.lists (
-  id uuid primary key default gen_random_uuid(),
-  owner_id uuid not null references public.users(id) on delete cascade,
-  name text not null,
-  created_at timestamptz not null default now()
-);
-
-create index if not exists idx_lists_owner on public.lists(owner_id);
-
-alter table public.lists enable row level security;
-grant select, insert, update, delete on public.lists to authenticated;
-
--- Same friends-only rule as everything else: your own lists, or a
--- friend's, so you can browse how they've organized their recipes.
-create policy "view own or friends lists"
-  on public.lists for select
-  using (owner_id = auth.uid() or public.is_friend(auth.uid(), owner_id));
-
-create policy "insert own lists"
-  on public.lists for insert
-  with check (owner_id = auth.uid());
-
-create policy "update own lists"
-  on public.lists for update
-  using (owner_id = auth.uid());
-
-create policy "delete own lists"
-  on public.lists for delete
-  using (owner_id = auth.uid());
-
--- ---------------------------------------------------------------------
--- 3. RECIPES
--- ---------------------------------------------------------------------
-create table if not exists public.recipes (
-  id uuid primary key default gen_random_uuid(),
-  author_id uuid not null references public.users(id) on delete cascade,
-  title text not null,
-  description text,
-  ingredients jsonb not null default '[]', -- [{ "name": "...", "amount": "...", "unit": "..." }]
-  steps jsonb not null default '[]',       -- ["Step one...", "Step two..."]
-  photo_url text,
-  tags text[] not null default '{}',       -- e.g. {"weeknight", "vegetarian", "dessert"} -- for browse/search, not a feed
-  prep_time_minutes integer,
-  servings integer,
-  notes text,                              -- free-text extras from the creator (substitutions, tips, "my mom's version," etc.)
-  -- Optional: which of the author's own lists this belongs to. Nullable
-  -- on purpose -- recipes with no list are completely fine.
-  list_id uuid references public.lists(id) on delete set null,
-  created_at timestamptz not null default now()
-);
-
-create index if not exists idx_recipes_author on public.recipes(author_id);
-create index if not exists idx_recipes_list on public.recipes(list_id);
-
--- ---------------------------------------------------------------------
--- 3c. RECIPE FAVORITES  (bookmark a friend's recipe into your own list.
---     Attribution always stays with the original author -- this is a
---     save/bookmark, not a copy or fork.)
--- ---------------------------------------------------------------------
-create table if not exists public.recipe_favorites (
-  id uuid primary key default gen_random_uuid(),
-  user_id uuid not null references public.users(id) on delete cascade,
-  recipe_id uuid not null references public.recipes(id) on delete cascade,
-  -- Personal organization of the FAVORITE, independent of however the
-  -- original author organized their own copy. Must be one of the
-  -- favoriter's own lists (enforced in the policies below) -- lets you
-  -- file a friend's ramen recipe into your own "quick lunches" list
-  -- without touching anything on their side.
-  list_id uuid references public.lists(id) on delete set null,
-  created_at timestamptz not null default now(),
-  constraint unique_favorite unique (user_id, recipe_id)
-);
-
-create index if not exists idx_favorites_user on public.recipe_favorites(user_id);
-
-alter table public.recipe_favorites enable row level security;
-grant select, insert, update, delete on public.recipe_favorites to authenticated;
-
--- You can only see/manage your own favorites list.
-create policy "view own favorites"
-  on public.recipe_favorites for select
-  using (user_id = auth.uid());
-
--- You can only favorite a recipe you're actually allowed to see (own or
--- a friend's) -- can't favorite a stranger's recipe id even if guessed,
--- since the recipes RLS policy blocks the underlying join either way.
--- If a list is given, it must be one of your own lists.
-create policy "add own favorite"
-  on public.recipe_favorites for insert
-  with check (
-    user_id = auth.uid()
-    and exists (
-      select 1 from public.recipes r
-      where r.id = recipe_id
-        and (r.author_id = auth.uid() or public.is_friend(auth.uid(), r.author_id))
-    )
-    and (
-      list_id is null
-      or exists (select 1 from public.lists g where g.id = list_id and g.owner_id = auth.uid())
-    )
-  );
-
--- Lets you (re)assign a favorite into one of your own lists later.
-create policy "update own favorite"
-  on public.recipe_favorites for update
-  using (user_id = auth.uid())
-  with check (
-    user_id = auth.uid()
-    and (
-      list_id is null
-      or exists (select 1 from public.lists g where g.id = list_id and g.owner_id = auth.uid())
-    )
-  );
-
-create policy "remove own favorite"
-  on public.recipe_favorites for delete
-  using (user_id = auth.uid());
-
--- ---------------------------------------------------------------------
--- 3b. RESTAURANT REVIEWS
---     No separate "restaurants" directory table for v1 -- each review
---     just stores its own place info. Two friends reviewing the same
---     physical restaurant creates two rows; deduping via a shared
---     places-id is a fine future enhancement, not needed for v1.
---     latitude/longitude are plain floats for now -- swap to PostGIS's
---     geography type later if/when doing real radius search at scale.
--- ---------------------------------------------------------------------
-create table if not exists public.restaurant_reviews (
-  id uuid primary key default gen_random_uuid(),
-  author_id uuid not null references public.users(id) on delete cascade,
-  -- Stable identifier from a place-lookup provider (e.g. Google Places).
-  -- This is what makes "collapse reviews of the same restaurant" possible
-  -- reliably -- matching on typed name/address alone is too fragile
-  -- (capitalization, formatting, slightly different GPS pins). Two
-  -- friends reviewing the same physical restaurant will share this id.
-  place_id text not null,
-  restaurant_name text not null,
-  address text,
-  latitude double precision not null,
-  longitude double precision not null,
-  rating smallint not null check (rating between 1 and 5),
-  tags text[] not null default '{}', -- cuisine/type, same shared-list approach as recipes
-  notes text,
-  list_id uuid references public.lists(id) on delete set null, -- optional, same "lists" as recipes
-  created_at timestamptz not null default now()
-);
-
-create index if not exists idx_reviews_author on public.restaurant_reviews(author_id);
-create index if not exists idx_reviews_place on public.restaurant_reviews(place_id); -- powers the "collapse into one" grouping
--- Speeds up "reviews near this lat/long" once that query gets built.
-create index if not exists idx_reviews_location on public.restaurant_reviews(latitude, longitude);
-
-alter table public.restaurant_reviews enable row level security;
-
-grant select, insert, update, delete on public.restaurant_reviews to authenticated;
-
--- Same rule as recipes: your own reviews, or an accepted friend's.
-create policy "view own or friends reviews"
-  on public.restaurant_reviews for select
-  using (author_id = auth.uid() or public.is_friend(auth.uid(), author_id));
-
-create policy "insert own reviews"
-  on public.restaurant_reviews for insert
-  with check (author_id = auth.uid());
-
-create policy "update own reviews"
-  on public.restaurant_reviews for update
-  using (author_id = auth.uid());
-
-create policy "delete own reviews"
-  on public.restaurant_reviews for delete
-  using (author_id = auth.uid());
-
--- ---------------------------------------------------------------------
--- 3d. RESTAURANT REVIEW FAVORITES  (same bookmark pattern as recipes --
---     favorite a friend's review, optionally file it into one of your
---     own lists, independent of how they organized their own review.)
--- ---------------------------------------------------------------------
-create table if not exists public.review_favorites (
-  id uuid primary key default gen_random_uuid(),
-  user_id uuid not null references public.users(id) on delete cascade,
-  review_id uuid not null references public.restaurant_reviews(id) on delete cascade,
-  list_id uuid references public.lists(id) on delete set null,
-  created_at timestamptz not null default now(),
-  constraint unique_review_favorite unique (user_id, review_id)
-);
-
-create index if not exists idx_review_favorites_user on public.review_favorites(user_id);
-
-alter table public.review_favorites enable row level security;
-grant select, insert, update, delete on public.review_favorites to authenticated;
-
-create policy "view own review favorites"
-  on public.review_favorites for select
-  using (user_id = auth.uid());
-
-create policy "add own review favorite"
-  on public.review_favorites for insert
-  with check (
-    user_id = auth.uid()
-    and exists (
-      select 1 from public.restaurant_reviews r
-      where r.id = review_id
-        and (r.author_id = auth.uid() or public.is_friend(auth.uid(), r.author_id))
-    )
-    and (
-      list_id is null
-      or exists (select 1 from public.lists l where l.id = list_id and l.owner_id = auth.uid())
-    )
-  );
-
-create policy "update own review favorite"
-  on public.review_favorites for update
-  using (user_id = auth.uid())
-  with check (
-    user_id = auth.uid()
-    and (
-      list_id is null
-      or exists (select 1 from public.lists l where l.id = list_id and l.owner_id = auth.uid())
-    )
-  );
-
-create policy "remove own review favorite"
-  on public.review_favorites for delete
-  using (user_id = auth.uid());
-
--- ---------------------------------------------------------------------
--- 4. ROW LEVEL SECURITY -- this is the "no strangers" guarantee.
---    Even a compromised or buggy frontend cannot read data outside
---    a user's own friend graph, because Postgres itself blocks it.
--- ---------------------------------------------------------------------
 alter table public.users enable row level security;
 alter table public.friendships enable row level security;
-alter table public.recipes enable row level security;
 
--- RLS policies control WHICH rows a query can see, but Postgres also
--- requires this separate, more basic grant before RLS even applies.
--- Without it, every query fails with "permission denied for table X"
--- regardless of how correct the policies below are.
 grant usage on schema public to authenticated, anon;
 grant select, insert, update, delete on public.users to authenticated;
 grant select, insert, update, delete on public.friendships to authenticated;
-grant select, insert, update, delete on public.recipes to authenticated;
-grant select, insert, update, delete on public.lists to authenticated;
 
 -- USERS: you can see your own row, and the row of anyone you're friends
--- with (needed to render their name/avatar on shared recipes).
+-- with (needed to render their name/avatar on shared content).
 create policy "view own or friend profile"
   on public.users for select
   using (id = auth.uid() or public.is_friend(auth.uid(), id));
@@ -376,6 +133,67 @@ create policy "manage own nicknames"
   using (user_id = auth.uid())
   with check (user_id = auth.uid());
 
+-- ---------------------------------------------------------------------
+-- 3a. LISTS  (user-defined collections -- "Sunday dinners," "Abe's
+--     favorites," "Tokyo trip," etc. Optional -- being on no list is
+--     completely fine. A recipe or review can be on MULTIPLE lists at
+--     once -- see list_items below -- since the same dish can
+--     legitimately belong to more than one collection, e.g. both of
+--     your kids' separate "favorites" lists.)
+-- ---------------------------------------------------------------------
+create table if not exists public.lists (
+  id uuid primary key default gen_random_uuid(),
+  owner_id uuid not null references public.users(id) on delete cascade,
+  name text not null,
+  created_at timestamptz not null default now()
+);
+
+create index if not exists idx_lists_owner on public.lists(owner_id);
+
+alter table public.lists enable row level security;
+grant select, insert, update, delete on public.lists to authenticated;
+
+-- Same friends-only rule as everything else: your own lists, or a
+-- friend's, so you can browse how they've organized their recipes.
+create policy "view own or friends lists"
+  on public.lists for select
+  using (owner_id = auth.uid() or public.is_friend(auth.uid(), owner_id));
+
+create policy "insert own lists"
+  on public.lists for insert
+  with check (owner_id = auth.uid());
+
+create policy "update own lists"
+  on public.lists for update
+  using (owner_id = auth.uid());
+
+create policy "delete own lists"
+  on public.lists for delete
+  using (owner_id = auth.uid());
+
+-- ---------------------------------------------------------------------
+-- 3. RECIPES
+-- ---------------------------------------------------------------------
+create table if not exists public.recipes (
+  id uuid primary key default gen_random_uuid(),
+  author_id uuid not null references public.users(id) on delete cascade,
+  title text not null,
+  description text,
+  ingredients jsonb not null default '[]', -- [{ "name": "...", "amount": "...", "unit": "..." }]
+  steps jsonb not null default '[]',       -- ["Step one...", "Step two..."]
+  photo_url text,
+  tags text[] not null default '{}',       -- e.g. {"weeknight", "vegetarian", "dessert"} -- for browse/search, not a feed
+  prep_time_minutes integer,
+  servings integer,
+  notes text,                              -- free-text extras from the creator (substitutions, tips, "my mom's version," etc.)
+  created_at timestamptz not null default now()
+);
+
+create index if not exists idx_recipes_author on public.recipes(author_id);
+
+alter table public.recipes enable row level security;
+grant select, insert, update, delete on public.recipes to authenticated;
+
 -- RECIPES: this is the core rule -- you can only ever read a recipe
 -- if you wrote it, or you're an accepted friend of whoever did.
 create policy "view own or friends recipes"
@@ -393,3 +211,194 @@ create policy "update own recipes"
 create policy "delete own recipes"
   on public.recipes for delete
   using (author_id = auth.uid());
+
+-- ---------------------------------------------------------------------
+-- 3b. RESTAURANT REVIEWS
+--     No separate "restaurants" directory table -- each review stores
+--     its own place info, but ALSO a stable place_id from a place-lookup
+--     provider (e.g. Google Places). That id is what makes it possible
+--     to reliably tell that two different reviews are about the same
+--     physical restaurant, so they can be grouped/collapsed together --
+--     matching on typed name/address alone would be too fragile
+--     (formatting differences, slightly different GPS pins).
+-- ---------------------------------------------------------------------
+create table if not exists public.restaurant_reviews (
+  id uuid primary key default gen_random_uuid(),
+  author_id uuid not null references public.users(id) on delete cascade,
+  place_id text not null,
+  restaurant_name text not null,
+  address text,
+  latitude double precision not null,
+  longitude double precision not null,
+  rating smallint not null check (rating between 1 and 5),
+  tags text[] not null default '{}', -- cuisine/type, same shared-list approach as recipes
+  notes text,
+  created_at timestamptz not null default now()
+);
+
+create index if not exists idx_reviews_author on public.restaurant_reviews(author_id);
+create index if not exists idx_reviews_place on public.restaurant_reviews(place_id); -- powers the "collapse into one" grouping
+create index if not exists idx_reviews_location on public.restaurant_reviews(latitude, longitude);
+
+alter table public.restaurant_reviews enable row level security;
+grant select, insert, update, delete on public.restaurant_reviews to authenticated;
+
+-- Same rule as recipes: your own reviews, or an accepted friend's.
+create policy "view own or friends reviews"
+  on public.restaurant_reviews for select
+  using (author_id = auth.uid() or public.is_friend(auth.uid(), author_id));
+
+create policy "insert own reviews"
+  on public.restaurant_reviews for insert
+  with check (author_id = auth.uid());
+
+create policy "update own reviews"
+  on public.restaurant_reviews for update
+  using (author_id = auth.uid());
+
+create policy "delete own reviews"
+  on public.restaurant_reviews for delete
+  using (author_id = auth.uid());
+
+-- ---------------------------------------------------------------------
+-- 3c. LIST ITEMS  (many-to-many: a recipe or review can be on multiple
+--     lists at once, and a list can hold many items. Replaces an
+--     earlier single list_id-per-recipe design once it became clear a
+--     dish can legitimately belong to more than one list -- e.g. both
+--     of your kids' separate "favorites" lists.)
+-- ---------------------------------------------------------------------
+create table if not exists public.list_items (
+  id uuid primary key default gen_random_uuid(),
+  list_id uuid not null references public.lists(id) on delete cascade,
+  recipe_id uuid references public.recipes(id) on delete cascade,
+  review_id uuid references public.restaurant_reviews(id) on delete cascade,
+  created_at timestamptz not null default now(),
+  constraint one_item_type check (
+    (recipe_id is not null and review_id is null) or
+    (recipe_id is null and review_id is not null)
+  ),
+  constraint unique_recipe_in_list unique (list_id, recipe_id),
+  constraint unique_review_in_list unique (list_id, review_id)
+);
+
+create index if not exists idx_list_items_list on public.list_items(list_id);
+create index if not exists idx_list_items_recipe on public.list_items(recipe_id);
+create index if not exists idx_list_items_review on public.list_items(review_id);
+
+alter table public.list_items enable row level security;
+grant select, insert, delete on public.list_items to authenticated;
+
+-- Viewable by whoever can see the list itself (owner or friend).
+create policy "view items in own or friends lists"
+  on public.list_items for select
+  using (
+    exists (
+      select 1 from public.lists l
+      where l.id = list_id
+        and (l.owner_id = auth.uid() or public.is_friend(auth.uid(), l.owner_id))
+    )
+  );
+
+-- You can only add to a list YOU own, and only items you can actually
+-- see (your own, or a friend's) -- so you can file a friend's recipe
+-- into your own list, but never add to someone else's list.
+create policy "add item to own list"
+  on public.list_items for insert
+  with check (
+    exists (select 1 from public.lists l where l.id = list_id and l.owner_id = auth.uid())
+    and (
+      (recipe_id is not null and exists (
+        select 1 from public.recipes r
+        where r.id = recipe_id
+          and (r.author_id = auth.uid() or public.is_friend(auth.uid(), r.author_id))
+      ))
+      or
+      (review_id is not null and exists (
+        select 1 from public.restaurant_reviews rr
+        where rr.id = review_id
+          and (rr.author_id = auth.uid() or public.is_friend(auth.uid(), rr.author_id))
+      ))
+    )
+  );
+
+create policy "remove item from own list"
+  on public.list_items for delete
+  using (
+    exists (select 1 from public.lists l where l.id = list_id and l.owner_id = auth.uid())
+  );
+
+-- ---------------------------------------------------------------------
+-- 3d. RECIPE FAVORITES  (bookmark a friend's -- or your own -- recipe.
+--     Just a flag: "I like this." List membership is handled entirely
+--     by list_items above, kept separate on purpose -- a favorite can
+--     be on zero, one, or many lists, and being on a list doesn't
+--     require having favorited it first.)
+-- ---------------------------------------------------------------------
+create table if not exists public.recipe_favorites (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references public.users(id) on delete cascade,
+  recipe_id uuid not null references public.recipes(id) on delete cascade,
+  created_at timestamptz not null default now(),
+  constraint unique_favorite unique (user_id, recipe_id)
+);
+
+create index if not exists idx_favorites_user on public.recipe_favorites(user_id);
+
+alter table public.recipe_favorites enable row level security;
+grant select, insert, delete on public.recipe_favorites to authenticated;
+
+create policy "view own favorites"
+  on public.recipe_favorites for select
+  using (user_id = auth.uid());
+
+-- Can't favorite a stranger's recipe id even if guessed, since the
+-- recipes RLS policy blocks the underlying join either way.
+create policy "add own favorite"
+  on public.recipe_favorites for insert
+  with check (
+    user_id = auth.uid()
+    and exists (
+      select 1 from public.recipes r
+      where r.id = recipe_id
+        and (r.author_id = auth.uid() or public.is_friend(auth.uid(), r.author_id))
+    )
+  );
+
+create policy "remove own favorite"
+  on public.recipe_favorites for delete
+  using (user_id = auth.uid());
+
+-- ---------------------------------------------------------------------
+-- 3e. RESTAURANT REVIEW FAVORITES  (same bookmark pattern as recipes.)
+-- ---------------------------------------------------------------------
+create table if not exists public.review_favorites (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references public.users(id) on delete cascade,
+  review_id uuid not null references public.restaurant_reviews(id) on delete cascade,
+  created_at timestamptz not null default now(),
+  constraint unique_review_favorite unique (user_id, review_id)
+);
+
+create index if not exists idx_review_favorites_user on public.review_favorites(user_id);
+
+alter table public.review_favorites enable row level security;
+grant select, insert, delete on public.review_favorites to authenticated;
+
+create policy "view own review favorites"
+  on public.review_favorites for select
+  using (user_id = auth.uid());
+
+create policy "add own review favorite"
+  on public.review_favorites for insert
+  with check (
+    user_id = auth.uid()
+    and exists (
+      select 1 from public.restaurant_reviews r
+      where r.id = review_id
+        and (r.author_id = auth.uid() or public.is_friend(auth.uid(), r.author_id))
+    )
+  );
+
+create policy "remove own review favorite"
+  on public.review_favorites for delete
+  using (user_id = auth.uid());
