@@ -82,7 +82,11 @@ export default async function RecipesPage() {
                     <p className="text-xs text-table-500 mb-1">
                       {r.author?.display_name ?? "Someone"}
                     </p>
-                    <h2 className="font-display text-xl mb-1">{r.title}</h2>
+                    <h2 className="font-display text-xl mb-1">
+                      <Link href={`/recipes/${r.id}`} className="hover:text-herb-400">
+                        {r.title}
+                      </Link>
+                    </h2>
                   </div>
                   {r.author_id === user?.id && (
                     <DeleteRecipeButton recipeId={r.id} photoPath={r.photo_url} />

@@ -7,9 +7,11 @@ import { createClient } from "@/lib/supabase/client";
 export default function DeleteRecipeButton({
   recipeId,
   photoPath,
+  redirectTo,
 }: {
   recipeId: string;
   photoPath: string | null;
+  redirectTo?: string;
 }) {
   const router = useRouter();
   const supabase = createClient();
@@ -30,6 +32,8 @@ export default function DeleteRecipeButton({
     setDeleting(false);
     if (error) {
       alert(`Couldn't delete: ${error.message}`);
+    } else if (redirectTo) {
+      router.push(redirectTo);
     } else {
       router.refresh();
     }
