@@ -71,15 +71,28 @@ state), not just the steady state.
   auto-generated `invite_code`, no username/email lookup exposed
 - `friendships` — `requester_id` / `addressee_id` / `status`
   (pending/accepted/declined); mutual-accept required
+- `friend_nicknames` — per-viewer private nickname for a friend, separate
+  from that friend's own `display_name` (I decide what I call my mom in
+  my own app; she doesn't set that)
+- `lists` — user-defined collections (e.g. "Sunday dinners," "Tokyo
+  trip"); named "Lists" in the UI (renamed from an earlier internal
+  "groups" naming for consistency between the schema and what users see)
 - `recipes` — title, ingredients/steps (jsonb), photo, `tags` (shared
   suggested cuisine/type list), `prep_time_minutes`, `servings`, `notes`,
-  optional `group_id`
-- `recipe_groups` — user-defined collections (e.g. "Sunday dinners");
-  optional, a recipe belongs to at most one group
-- `restaurant_reviews` — restaurant name/address/lat/long, rating, notes.
-  No separate "restaurants" directory table — each review stores its own
-  place info; deduping via a shared place ID is a possible future
-  enhancement, not needed for v1.
+  optional `list_id` (the *author's own* organization of their own recipe)
+- `recipe_favorites` — bookmark a friend's (or your own) recipe into your
+  own list, independent of how the original author organized their copy.
+  Attribution always stays with the original author — this is a
+  bookmark, not a fork/copy.
+- `restaurant_reviews` — restaurant name/address/lat/long, rating, tags,
+  notes, optional `list_id`. Includes a `place_id` from a place-lookup
+  provider (e.g. Google Places) — this is what makes it possible to
+  reliably tell that two different reviews are about the *same physical
+  restaurant*, so they can be grouped/collapsed together. Matching on
+  typed name/address alone would be too fragile (formatting differences,
+  slightly different GPS pins).
+- `review_favorites` — same bookmark pattern as `recipe_favorites`, for
+  restaurant reviews.
 
 ---
 
@@ -149,24 +162,113 @@ not just for structured data.
 
 ---
 
+## Product & UI direction (planning session, no code yet)
+
+A full session was spent deliberately designing the browse/search
+experience *before* writing UI code for it — catching structural
+decisions early rather than backtracking after building the wrong thing.
+Nothing below is built yet; it's the plan the next build session works from.
+
+**Landing page = a hub, not a feed or a search bar.** After login: an "add
+friend" action (invite code, planned QR code), a friends list, account
+settings, and two big entry points — Recipes and Restaurants. Deliberately
+not search-first, since the two features serve different intents (deciding
+what to cook vs. finding somewhere to eat) that don't share one unified
+search well.
+
+**The recipe/restaurant browse page has a consistent 4-tier ranking,**
+used identically in both features. For a given search/filter, results are
+grouped into (in order):
+1. **In your lists** — recipes/reviews (yours, or a friend's you
+   favorited) that you've filed into one of your own Lists
+2. **Your own** — your own recipes/reviews you haven't filed into a list
+3. **Favorited** — a friend's recipe/review you've bookmarked but not
+   filed into a list yet
+4. **More from friends** — visible via the friend graph, but you haven't
+   interacted with it at all
+
+Empty tiers are hidden entirely rather than shown with a "nothing here"
+placeholder. This ranking rewards personal curation without hiding
+anything — everything friends have shared is still reachable, just sorted
+by how much you've engaged with it. **Open question, not yet decided:**
+when a *collapsed* restaurant card (see below) contains reviews spanning
+multiple tiers (e.g. your own listed review + a friend's untouched one),
+current thinking is the card ranks by whichever tier is *highest* among
+the reviews it contains — not fully settled.
+
+**"Me" is just another entry in the friend-selector, not a separate UI.**
+Rather than building a distinct "my recipes" section, your own collection
+uses the exact same friend-selector/Lists/tag-filter pattern as browsing a
+friend — since the RLS logic (`own or friend's`) already treats it that
+way. Less code, more consistent UX.
+
+**Favoriting flow:** tapping favorite on a friend's recipe/review prompts
+to add it to an existing list, create a new list on the spot, or decide
+later (leaves `list_id` null, sortable into a list anytime after).
+
+**Restaurant reviews collapse by `place_id`.** Multiple friends reviewing
+the same physical restaurant show as one card in the results list (avg
+rating, small stack of reviewer avatars), which expands into a detail
+page showing each individual review, further expandable per-review. This
+is the reason `place_id` (via a real place-lookup provider) was added to
+the schema instead of relying on typed name/address — reliable grouping
+needs a stable shared identifier, not fuzzy text matching.
+
+**Location search, not just "near me."** Browsing restaurants needs to
+support searching near a place you're not currently at (e.g. looking up
+Tokyo spots before a trip), not just GPS-based "near me." This and the
+`place_id`-for-collapsing need above point to the same solution: a real
+place-lookup/geocoding provider (Google Places is the leading candidate).
+This is a genuinely new paid third-party dependency (free tier exists,
+but needs a billing-enabled API key eventually) — worth a deliberate,
+separate setup session rather than folding into other work.
+
+**Consequence for the already-built review form:** the current form
+(built in an earlier session) uses the browser's geolocation to capture
+*your* current GPS as a stand-in for the restaurant's location. That
+needs to be reworked to use place-lookup autocomplete instead once the
+provider is chosen — flagged now so it isn't a surprise later.
+
+**Possible rename: "You Pick."** Considered as a more personal/fun name
+than "Table" (a running joke — friends always say "you pick" when asked
+where to eat). Not yet committed; if it happens, it should be its own
+clean task (README, `package.json`, Tailwind's `table-*` color palette
+naming, GitHub repo name/description), not a side effect of other work.
+
+---
+
 ## Built so far (as of most recent session)
 
 - Auth (magic link, working end-to-end)
 - Mutual friendships via invite code
 - Recipe posting, photo upload (private storage), delete
 - Profile / display name
-- Restaurant review submission with geolocation capture (no display UI yet)
-- Full schema for recipes, recipe groups, restaurant reviews, all RLS-gated
+- Restaurant review submission with geolocation capture (no display UI yet
+  — will need rework once place-lookup replaces raw geolocation, see above)
+- Full schema for recipes, lists, recipe favorites, restaurant reviews,
+  review favorites, and friend nicknames — all RLS-gated. Schema is
+  designed ahead of the UI for once, following the planning session above.
 
 ## Not yet built
 
-- Browse/search UI for recipes (replacing the old simple feed page)
-- Restaurant review display + radius/cuisine-filter search
+- Browse/search UI for recipes and restaurants (the whole tiered
+  structure above is designed but not coded)
+- Recipe/restaurant detail pages (don't exist at all yet — the old simple
+  feed showed everything inline, so nowhere to click into currently)
+- Restaurant review form rework (place-lookup instead of raw geolocation)
+- Favoriting UI (favorite button + add-to-list prompt)
+- Friend nickname UI
 - Recipe edit (delete exists, edit doesn't)
 - QR-code add-friend flow
+- Possible "You Pick" rename
 
-## Known deferred item
+## Known deferred items
 
-Pinned to Next.js `14.2.35` (patched for a Dec 2025 CVE) for local dev.
-Needs a deliberate, tested upgrade to latest before any public deployment
-or real user onboarding — not urgent for continued local development.
+- Pinned to Next.js `14.2.35` (patched for a Dec 2025 CVE) for local dev.
+  Needs a deliberate, tested upgrade to latest before any public
+  deployment or real user onboarding — not urgent for continued local
+  development.
+- Place-lookup/geocoding provider (likely Google Places) not yet chosen
+  or set up — needed for restaurant location search, review-time
+  restaurant selection, and reliable same-restaurant collapsing. Real
+  paid third-party dependency, worth its own deliberate setup session.
