@@ -3,14 +3,15 @@ import { notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import SearchBar from "../../SearchBar";
 import FavoriteButton from "../../[id]/FavoriteButton";
+import ReviewFavoriteButton from "@/app/restaurants/ReviewFavoriteButton";
 import NicknameEditor from "./NicknameEditor";
 
-export default async function FriendRecipesPage({
+export default async function FriendPage({
   params,
   searchParams,
 }: {
   params: { id: string };
-  searchParams: { q?: string; tag?: string; list?: string };
+  searchParams: { type?: string; q?: string; tag?: string; list?: string };
 }) {
   const supabase = createClient();
 
@@ -21,6 +22,7 @@ export default async function FriendRecipesPage({
 
   const personId = params.id;
   const isSelf = personId === user.id;
+  const type = searchParams.type === "restaurants" ? "restaurants" : "recipes";
 
   // RLS ("own or friend") already guarantees this only returns something
   // if it's your own profile or an accepted friend's -- otherwise this
@@ -33,8 +35,6 @@ export default async function FriendRecipesPage({
 
   if (!person) notFound();
 
-  // Nicknames are private to the viewer -- only fetched/shown when
-  // looking at a friend's page, never your own.
   let nickname: string | null = null;
   if (!isSelf) {
     const { data: nicknameRow } = await supabase
@@ -45,7 +45,6 @@ export default async function FriendRecipesPage({
       .maybeSingle();
     nickname = nicknameRow?.nickname ?? null;
   }
-
   const displayLabel = nickname ?? person.display_name;
 
   const q = searchParams.q ?? "";
@@ -57,67 +56,11 @@ export default async function FriendRecipesPage({
     .select("id, name")
     .eq("owner_id", personId);
 
-  let listFilterRecipeIds: string[] | null = null;
-  if (activeList) {
-    const { data: itemsInList } = await supabase
-      .from("list_items")
-      .select("recipe_id")
-      .eq("list_id", activeList)
-      .not("recipe_id", "is", null);
-    listFilterRecipeIds = (itemsInList ?? []).map((i) => i.recipe_id as string);
-  }
-
-  let query = supabase
-    .from("recipes")
-    .select("id, author_id, title, tags, prep_time_minutes, servings")
-    .eq("author_id", personId)
-    .order("created_at", { ascending: false });
-
-  if (activeTag) query = query.contains("tags", [activeTag]);
-  if (listFilterRecipeIds) query = query.in("id", listFilterRecipeIds);
-  if (q) query = query.or(`title.ilike.%${q}%,tags.cs.{${q}}`);
-
-  const { data: recipes } = await query;
-  const allRecipes = recipes ?? [];
-
-  const tagCounts = new Map<string, number>();
-  allRecipes.forEach((r) => {
-    (r.tags ?? []).forEach((t: string) => tagCounts.set(t, (tagCounts.get(t) ?? 0) + 1));
-  });
-  const topTags = [...tagCounts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 8);
-
-  const { data: myListItems } = await supabase
-    .from("list_items")
-    .select("recipe_id, list:list_id!inner(owner_id)")
-    .eq("list.owner_id", user.id)
-    .not("recipe_id", "is", null);
-  const myListedRecipeIds = new Set((myListItems ?? []).map((i: any) => i.recipe_id));
-
-  const { data: myFavorites } = await supabase
-    .from("recipe_favorites")
-    .select("recipe_id")
-    .eq("user_id", user.id);
-  const myFavoritedRecipeIds = new Set((myFavorites ?? []).map((f) => f.recipe_id));
-
-  const tiers: Record<1 | 2 | 3 | 4, any[]> = { 1: [], 2: [], 3: [], 4: [] };
-  for (const r of allRecipes) {
-    if (myListedRecipeIds.has(r.id)) tiers[1].push(r);
-    else if (r.author_id === user.id) tiers[2].push(r);
-    else if (myFavoritedRecipeIds.has(r.id)) tiers[3].push(r);
-    else tiers[4].push(r);
-  }
-
-  const sections = [
-    { key: 1, label: "In your lists", items: tiers[1] },
-    { key: 2, label: "Your recipes", items: tiers[2] },
-    { key: 3, label: "Favorited", items: tiers[3] },
-    { key: 4, label: "More recipes", items: tiers[4] },
-  ].filter((s) => s.items.length > 0);
-
   const basePath = `/recipes/friend/${personId}`;
 
   function buildHref(overrides: Record<string, string | null>) {
     const params = new URLSearchParams();
+    if (type !== "recipes") params.set("type", type);
     if (q) params.set("q", q);
     if (activeTag) params.set("tag", activeTag);
     if (activeList) params.set("list", activeList);
@@ -128,6 +71,156 @@ export default async function FriendRecipesPage({
     const qs = params.toString();
     return qs ? `${basePath}?${qs}` : basePath;
   }
+
+  // ---------------------------------------------------------------
+  // RECIPES branch
+  // ---------------------------------------------------------------
+  let recipeItems: any[] = [];
+  let recipeTopTags: [string, number][] = [];
+  let recipeMyFavoritedIds = new Set<string>();
+
+  if (type === "recipes") {
+    let listFilterRecipeIds: string[] | null = null;
+    if (activeList) {
+      const { data: itemsInList } = await supabase
+        .from("list_items")
+        .select("recipe_id")
+        .eq("list_id", activeList)
+        .not("recipe_id", "is", null);
+      listFilterRecipeIds = (itemsInList ?? []).map((i) => i.recipe_id as string);
+    }
+
+    let query = supabase
+      .from("recipes")
+      .select("id, author_id, title, tags, prep_time_minutes, servings, photo_url")
+      .eq("author_id", personId)
+      .order("created_at", { ascending: false });
+
+    if (activeTag) query = query.contains("tags", [activeTag]);
+    if (listFilterRecipeIds) query = query.in("id", listFilterRecipeIds);
+    if (q) query = query.or(`title.ilike.%${q}%,tags.cs.{${q}}`);
+
+    const { data: recipes } = await query;
+    const allRecipes = await Promise.all(
+      (recipes ?? []).map(async (r: any) => {
+        if (!r.photo_url) return { ...r, thumbUrl: null };
+        const { data } = await supabase.storage
+          .from("recipe-photos")
+          .createSignedUrl(r.photo_url, 60 * 60);
+        return { ...r, thumbUrl: data?.signedUrl ?? null };
+      })
+    );
+
+    const tagCounts = new Map<string, number>();
+    allRecipes.forEach((r) => {
+      (r.tags ?? []).forEach((t: string) => tagCounts.set(t, (tagCounts.get(t) ?? 0) + 1));
+    });
+    recipeTopTags = [...tagCounts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 8);
+
+    const { data: myListItems } = await supabase
+      .from("list_items")
+      .select("recipe_id, list:list_id!inner(owner_id)")
+      .eq("list.owner_id", user.id)
+      .not("recipe_id", "is", null);
+    const myListedIds = new Set((myListItems ?? []).map((i: any) => i.recipe_id));
+
+    const { data: myFavorites } = await supabase
+      .from("recipe_favorites")
+      .select("recipe_id")
+      .eq("user_id", user.id);
+    recipeMyFavoritedIds = new Set((myFavorites ?? []).map((f) => f.recipe_id));
+
+    const tiers: Record<1 | 2 | 3 | 4, any[]> = { 1: [], 2: [], 3: [], 4: [] };
+    for (const r of allRecipes) {
+      if (myListedIds.has(r.id)) tiers[1].push(r);
+      else if (r.author_id === user.id) tiers[2].push(r);
+      else if (recipeMyFavoritedIds.has(r.id)) tiers[3].push(r);
+      else tiers[4].push(r);
+    }
+    recipeItems = [
+      { key: 1, label: "In your lists", items: tiers[1] },
+      { key: 2, label: "Your recipes", items: tiers[2] },
+      { key: 3, label: "Favorited", items: tiers[3] },
+      { key: 4, label: "More recipes", items: tiers[4] },
+    ].filter((s) => s.items.length > 0);
+  }
+
+  // ---------------------------------------------------------------
+  // RESTAURANTS branch
+  // ---------------------------------------------------------------
+  let reviewItems: any[] = [];
+  let reviewTopTags: [string, number][] = [];
+  let reviewMyFavoritedIds = new Set<string>();
+
+  if (type === "restaurants") {
+    let listFilterReviewIds: string[] | null = null;
+    if (activeList) {
+      const { data: itemsInList } = await supabase
+        .from("list_items")
+        .select("review_id")
+        .eq("list_id", activeList)
+        .not("review_id", "is", null);
+      listFilterReviewIds = (itemsInList ?? []).map((i) => i.review_id as string);
+    }
+
+    let query = supabase
+      .from("restaurant_reviews")
+      .select("id, author_id, restaurant_name, rating, tags, review_text, photo_urls")
+      .eq("author_id", personId)
+      .order("created_at", { ascending: false });
+
+    if (activeTag) query = query.contains("tags", [activeTag]);
+    if (listFilterReviewIds) query = query.in("id", listFilterReviewIds);
+    if (q) query = query.or(`restaurant_name.ilike.%${q}%,tags.cs.{${q}},review_text.ilike.%${q}%`);
+
+    const { data: reviews } = await query;
+    const allReviews = await Promise.all(
+      (reviews ?? []).map(async (r: any) => {
+        const primaryPath = r.photo_urls?.[0];
+        if (!primaryPath) return { ...r, thumbUrl: null };
+        const { data } = await supabase.storage
+          .from("review-photos")
+          .createSignedUrl(primaryPath, 60 * 60);
+        return { ...r, thumbUrl: data?.signedUrl ?? null };
+      })
+    );
+
+    const tagCounts = new Map<string, number>();
+    allReviews.forEach((r) => {
+      (r.tags ?? []).forEach((t: string) => tagCounts.set(t, (tagCounts.get(t) ?? 0) + 1));
+    });
+    reviewTopTags = [...tagCounts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 8);
+
+    const { data: myListItems } = await supabase
+      .from("list_items")
+      .select("review_id, list:list_id!inner(owner_id)")
+      .eq("list.owner_id", user.id)
+      .not("review_id", "is", null);
+    const myListedIds = new Set((myListItems ?? []).map((i: any) => i.review_id));
+
+    const { data: myFavorites } = await supabase
+      .from("review_favorites")
+      .select("review_id")
+      .eq("user_id", user.id);
+    reviewMyFavoritedIds = new Set((myFavorites ?? []).map((f) => f.review_id));
+
+    const tiers: Record<1 | 2 | 3 | 4, any[]> = { 1: [], 2: [], 3: [], 4: [] };
+    for (const r of allReviews) {
+      if (myListedIds.has(r.id)) tiers[1].push(r);
+      else if (r.author_id === user.id) tiers[2].push(r);
+      else if (reviewMyFavoritedIds.has(r.id)) tiers[3].push(r);
+      else tiers[4].push(r);
+    }
+    reviewItems = [
+      { key: 1, label: "In your lists", items: tiers[1] },
+      { key: 2, label: "Your reviews", items: tiers[2] },
+      { key: 3, label: "Favorited", items: tiers[3] },
+      { key: 4, label: "More reviews", items: tiers[4] },
+    ].filter((s) => s.items.length > 0);
+  }
+
+  const topTags = type === "recipes" ? recipeTopTags : reviewTopTags;
+  const sections = type === "recipes" ? recipeItems : reviewItems;
 
   return (
     <main className="max-w-2xl mx-auto px-6 py-12">
@@ -140,9 +233,7 @@ export default async function FriendRecipesPage({
           {displayLabel?.[0]?.toUpperCase() ?? "?"}
         </div>
         <div>
-          <h1 className="font-display text-2xl">
-            {isSelf ? "Your recipes" : `${displayLabel}'s recipes`}
-          </h1>
+          <h1 className="font-display text-2xl">{isSelf ? "You" : displayLabel}</h1>
           {!isSelf && nickname && (
             <p className="text-xs text-table-500">{person.display_name}</p>
           )}
@@ -164,7 +255,34 @@ export default async function FriendRecipesPage({
         </Link>
       )}
 
-      <SearchBar basePath={basePath} />
+      {/* Content type tabs */}
+      <div className="flex gap-2 mb-4 border-b border-table-700 pb-3">
+        <Link
+          href={`${basePath}${q ? `?q=${encodeURIComponent(q)}` : ""}`}
+          className={`text-sm px-3 py-1.5 rounded-md ${
+            type === "recipes" ? "bg-table-800 text-herb-400" : "text-table-500"
+          }`}
+        >
+          Recipes
+        </Link>
+        <Link
+          href={`${basePath}?type=restaurants${q ? `&q=${encodeURIComponent(q)}` : ""}`}
+          className={`text-sm px-3 py-1.5 rounded-md ${
+            type === "restaurants" ? "bg-table-800 text-herb-400" : "text-table-500"
+          }`}
+        >
+          Restaurants
+        </Link>
+      </div>
+
+      <SearchBar
+        basePath={basePath}
+        placeholder={
+          type === "restaurants"
+            ? "Search restaurants by name or tag…"
+            : "Search recipes by name or tag…"
+        }
+      />
 
       {(personLists ?? []).length > 0 && (
         <div className="flex gap-2 mb-4 border-b border-table-700 pb-3 flex-wrap">
@@ -218,33 +336,98 @@ export default async function FriendRecipesPage({
         <p className="text-table-500">Nothing here yet.</p>
       ) : (
         <div className="space-y-8">
-          {sections.map((section) => (
+          {sections.map((section: any) => (
             <div key={section.key}>
               <p className="text-xs font-medium text-table-400 mb-2">{section.label}</p>
-              <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-                {section.items.map((r) => (
-                  <div
-                    key={r.id}
-                    className="rounded-lg border border-table-700 bg-table-900 p-3"
-                  >
-                    <Link href={`/recipes/${r.id}`} className="hover:text-herb-400">
-                      <p className="text-sm font-medium mb-1">{r.title}</p>
-                    </Link>
-                    {r.prep_time_minutes && (
-                      <p className="text-[11px] text-table-500 mb-1.5">
-                        <i className="ti ti-clock" style={{ fontSize: 11 }} />{" "}
-                        {r.prep_time_minutes} min
-                      </p>
-                    )}
-                    {!isSelf && (
-                      <FavoriteButton
-                        recipeId={r.id}
-                        initialFavorited={myFavoritedRecipeIds.has(r.id)}
-                      />
-                    )}
-                  </div>
-                ))}
-              </div>
+
+              {type === "recipes" ? (
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                  {section.items.map((r: any) => (
+                    <div
+                      key={r.id}
+                      className="rounded-lg border border-table-700 bg-table-900 overflow-hidden"
+                    >
+                      {r.thumbUrl && (
+                        <Link href={`/recipes/${r.id}`}>
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img
+                            src={r.thumbUrl}
+                            alt={r.title}
+                            className="w-full h-24 object-cover"
+                          />
+                        </Link>
+                      )}
+                      <div className="p-3">
+                        <Link href={`/recipes/${r.id}`} className="hover:text-herb-400">
+                          <p className="text-sm font-medium mb-1">{r.title}</p>
+                        </Link>
+                        {r.prep_time_minutes && (
+                          <p className="text-[11px] text-table-500 mb-1.5">
+                            <i className="ti ti-clock" style={{ fontSize: 11 }} />{" "}
+                            {r.prep_time_minutes} min
+                          </p>
+                        )}
+                        {!isSelf && (
+                          <FavoriteButton
+                            recipeId={r.id}
+                            initialFavorited={recipeMyFavoritedIds.has(r.id)}
+                          />
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {section.items.map((r: any) => (
+                    <div
+                      key={r.id}
+                      className="rounded-lg border border-table-700 bg-table-900 p-3 flex gap-3"
+                    >
+                      {r.thumbUrl && (
+                        <Link href={`/reviews/${r.id}`} className="flex-shrink-0">
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img
+                            src={r.thumbUrl}
+                            alt={r.restaurant_name}
+                            className="w-20 h-20 rounded-md object-contain bg-table-950"
+                          />
+                        </Link>
+                      )}
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-start justify-between gap-2">
+                          <Link
+                            href={`/reviews/${r.id}`}
+                            className="text-sm font-medium hover:text-herb-400"
+                          >
+                            {r.restaurant_name}
+                          </Link>
+                          <p className="text-xs text-table-400 flex items-center gap-1 flex-shrink-0">
+                            <i
+                              className="ti ti-star-filled"
+                              style={{ fontSize: 12, color: "#e0b04d" }}
+                            />
+                            {r.rating}
+                          </p>
+                        </div>
+                        {r.review_text && (
+                          <p className="text-xs text-table-400 mt-1 line-clamp-2">
+                            {r.review_text}
+                          </p>
+                        )}
+                        {!isSelf && (
+                          <div className="mt-2">
+                            <ReviewFavoriteButton
+                              reviewId={r.id}
+                              initialFavorited={reviewMyFavoritedIds.has(r.id)}
+                            />
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           ))}
         </div>

@@ -1,21 +1,31 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
-import PlaceSearch, { type Place } from "./PlaceSearch";
+import PlaceSearch, { type Place } from "../../new/PlaceSearch";
 import TagInput from "@/components/TagInput";
 
 const MAX_PHOTOS = 5;
 type TagSuggestion = { tag: string; count: number };
 
-export default function NewReviewPage() {
+// Unified so "make primary" can reorder existing and newly-added photos
+// against each other -- order in this array IS the final save order.
+type PhotoItem =
+  | { type: "existing"; path: string; url: string }
+  | { type: "new"; file: File };
+
+export default function EditReviewPage() {
   const router = useRouter();
+  const params = useParams();
+  const reviewId = params.id as string;
   const supabase = createClient();
 
+  const [loading, setLoading] = useState(true);
   const [place, setPlace] = useState<Place | null>(null);
   const [rating, setRating] = useState(5);
-  const [photos, setPhotos] = useState<File[]>([]);
+  const [photoItems, setPhotoItems] = useState<PhotoItem[]>([]);
+  const [originalPaths, setOriginalPaths] = useState<string[]>([]);
   const [reviewText, setReviewText] = useState("");
   const [notes, setNotes] = useState("");
   const [tags, setTags] = useState<string[]>([]);
@@ -24,6 +34,50 @@ export default function NewReviewPage() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    async function load() {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      if (!user) return;
+
+      const { data: review } = await supabase
+        .from("restaurant_reviews")
+        .select("*")
+        .eq("id", reviewId)
+        .single();
+
+      if (!review || review.author_id !== user.id) {
+        router.push(`/reviews/${reviewId}`);
+        return;
+      }
+
+      setPlace({
+        placeId: review.place_id,
+        name: review.restaurant_name,
+        address: review.address ?? "",
+        lat: review.latitude,
+        lng: review.longitude,
+      });
+      setRating(review.rating);
+      setReviewText(review.review_text ?? "");
+      setNotes(review.notes ?? "");
+      setTags(review.tags ?? []);
+
+      const paths: string[] = review.photo_urls ?? [];
+      setOriginalPaths(paths);
+      const items: PhotoItem[] = await Promise.all(
+        paths.map(async (path) => {
+          const { data } = await supabase.storage
+            .from("review-photos")
+            .createSignedUrl(path, 60 * 60);
+          return { type: "existing" as const, path, url: data?.signedUrl ?? "" };
+        })
+      );
+      setPhotoItems(items);
+      setLoading(false);
+    }
+    load();
+
     async function loadTagSuggestions() {
       const { data } = await supabase.from("restaurant_reviews").select("tags");
       const counts = new Map<string, number>();
@@ -37,20 +91,25 @@ export default function NewReviewPage() {
       );
     }
     loadTagSuggestions();
-  }, [supabase]);
+  }, [reviewId, supabase, router]);
 
   function handleAddPhotos(e: React.ChangeEvent<HTMLInputElement>) {
     const files = Array.from(e.target.files ?? []);
-    setPhotos((prev) => [...prev, ...files].slice(0, MAX_PHOTOS));
+    const room = MAX_PHOTOS - photoItems.length;
+    const toAdd = files.slice(0, Math.max(room, 0)).map((file) => ({
+      type: "new" as const,
+      file,
+    }));
+    setPhotoItems((prev) => [...prev, ...toAdd]);
     e.target.value = "";
   }
 
-  function removePhoto(index: number) {
-    setPhotos((prev) => prev.filter((_, i) => i !== index));
+  function removePhotoItem(index: number) {
+    setPhotoItems((prev) => prev.filter((_, i) => i !== index));
   }
 
   function makePrimary(index: number) {
-    setPhotos((prev) => {
+    setPhotoItems((prev) => {
       const next = [...prev];
       const [item] = next.splice(index, 1);
       next.unshift(item);
@@ -78,42 +137,65 @@ export default function NewReviewPage() {
       return;
     }
 
-    // Upload photos first, collect their storage paths.
-    const photoPaths: string[] = [];
-    for (const file of photos) {
-      const ext = file.name.split(".").pop();
-      const path = `${user.id}/${crypto.randomUUID()}.${ext}`;
-      const { error: uploadError } = await supabase.storage
-        .from("review-photos")
-        .upload(path, file);
-      if (uploadError) {
-        setError(`Photo upload failed: ${uploadError.message}`);
-        setSaving(false);
-        return;
+    // Walk photoItems IN ORDER -- upload new ones as we hit them, keep
+    // existing paths as-is. The resulting array's order is exactly what
+    // gets saved, so whichever item the user moved to the front becomes
+    // the primary/thumbnail photo.
+    const finalPhotoPaths: string[] = [];
+    for (const item of photoItems) {
+      if (item.type === "existing") {
+        finalPhotoPaths.push(item.path);
+      } else {
+        const ext = item.file.name.split(".").pop();
+        const path = `${user.id}/${crypto.randomUUID()}.${ext}`;
+        const { error: uploadError } = await supabase.storage
+          .from("review-photos")
+          .upload(path, item.file);
+        if (uploadError) {
+          setError(`Photo upload failed: ${uploadError.message}`);
+          setSaving(false);
+          return;
+        }
+        finalPhotoPaths.push(path);
       }
-      photoPaths.push(path);
     }
 
-    const { error: insertError } = await supabase.from("restaurant_reviews").insert({
-      author_id: user.id,
-      place_id: place.placeId,
-      restaurant_name: place.name,
-      address: place.address,
-      latitude: place.lat,
-      longitude: place.lng,
-      rating,
-      tags,
-      review_text: reviewText || null,
-      notes: notes || null,
-      photo_urls: photoPaths,
-    });
+    // Clean up any originally-existing photos the user removed.
+    const removedPaths = originalPaths.filter((p) => !finalPhotoPaths.includes(p));
+    if (removedPaths.length > 0) {
+      await supabase.storage.from("review-photos").remove(removedPaths);
+    }
+
+    const { error: updateError } = await supabase
+      .from("restaurant_reviews")
+      .update({
+        place_id: place.placeId,
+        restaurant_name: place.name,
+        address: place.address,
+        latitude: place.lat,
+        longitude: place.lng,
+        rating,
+        tags,
+        review_text: reviewText || null,
+        notes: notes || null,
+        photo_urls: finalPhotoPaths,
+      })
+      .eq("id", reviewId);
 
     setSaving(false);
-    if (insertError) {
-      setError(insertError.message);
+    if (updateError) {
+      setError(updateError.message);
     } else {
-      router.push("/recipes");
+      router.push(`/reviews/${reviewId}`);
     }
+  }
+
+  if (loading) {
+    return (
+      <main className="max-w-lg mx-auto px-6 py-12">
+        <p className="text-table-500 text-sm">Loading…</p>
+      </main>
+    );
   }
 
   return (
@@ -125,12 +207,12 @@ export default function NewReviewPage() {
       >
         ← Cancel
       </button>
-      <h1 className="font-display text-3xl mb-8">Share a restaurant</h1>
+      <h1 className="font-display text-3xl mb-8">Edit review</h1>
 
       <form onSubmit={handleSubmit} className="space-y-6">
         <div>
-          <label className="block text-sm text-table-400 mb-1">Find the restaurant</label>
-          <PlaceSearch onSelect={setPlace} />
+          <label className="block text-sm text-table-400 mb-1">Restaurant</label>
+          <PlaceSearch onSelect={setPlace} initialPlace={place} />
         </div>
 
         <div>
@@ -155,14 +237,14 @@ export default function NewReviewPage() {
 
         <div>
           <label className="block text-sm text-table-400 mb-2">
-            Photos ({photos.length} of {MAX_PHOTOS}) — tap the star to set the main photo
+            Photos ({photoItems.length} of {MAX_PHOTOS}) — tap the star to set the main photo
           </label>
           <div className="flex gap-2 flex-wrap">
-            {photos.map((file, i) => (
+            {photoItems.map((item, i) => (
               <div key={i} className="relative w-16 h-16">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img
-                  src={URL.createObjectURL(file)}
+                  src={item.type === "existing" ? item.url : URL.createObjectURL(item.file)}
                   alt=""
                   className="w-16 h-16 object-cover rounded-md"
                 />
@@ -182,14 +264,14 @@ export default function NewReviewPage() {
                 )}
                 <button
                   type="button"
-                  onClick={() => removePhoto(i)}
+                  onClick={() => removePhotoItem(i)}
                   className="absolute -top-1.5 -right-1.5 w-4 h-4 rounded-full bg-table-800 text-[10px] flex items-center justify-center"
                 >
                   ✕
                 </button>
               </div>
             ))}
-            {photos.length < MAX_PHOTOS && (
+            {photoItems.length < MAX_PHOTOS && (
               <label className="w-16 h-16 rounded-md border border-dashed border-table-600 flex items-center justify-center cursor-pointer text-table-500 text-lg">
                 +
                 <input
@@ -210,7 +292,6 @@ export default function NewReviewPage() {
             value={reviewText}
             onChange={(e) => setReviewText(e.target.value)}
             rows={3}
-            placeholder="What was it like?"
             className="w-full rounded-md bg-table-900 border border-table-700 px-3 py-2 focus:border-herb-500"
           />
         </div>
@@ -221,7 +302,6 @@ export default function NewReviewPage() {
             value={notes}
             onChange={(e) => setNotes(e.target.value)}
             rows={2}
-            placeholder="Practical tips -- go early, cash only, etc."
             className="w-full rounded-md bg-table-900 border border-table-700 px-3 py-2 focus:border-herb-500"
           />
         </div>
@@ -238,7 +318,7 @@ export default function NewReviewPage() {
           disabled={saving}
           className="w-full rounded-md bg-herb-600 hover:bg-herb-500 transition-colors px-4 py-3 font-medium disabled:opacity-50"
         >
-          {saving ? "Sharing…" : "Share with friends"}
+          {saving ? "Saving…" : "Save changes"}
         </button>
       </form>
     </main>

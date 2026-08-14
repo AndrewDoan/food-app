@@ -1,10 +1,11 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 
 export default function ProfilePage() {
+  const router = useRouter();
   const supabase = createClient();
   const [displayName, setDisplayName] = useState("");
   const [loading, setLoading] = useState(true);
@@ -66,9 +67,12 @@ export default function ProfilePage() {
 
   return (
     <main className="max-w-sm mx-auto px-6 py-12">
-      <Link href="/recipes" className="text-sm text-table-400 hover:text-table-100">
+      <button
+        onClick={() => router.back()}
+        className="text-sm text-table-400 hover:text-table-100"
+      >
         ← Back
-      </Link>
+      </button>
 
       <h1 className="font-display text-3xl mt-4 mb-8">Your profile</h1>
 

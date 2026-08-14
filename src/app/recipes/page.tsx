@@ -84,7 +84,7 @@ export default async function RecipesPage({
   let query = supabase
     .from("recipes")
     .select(
-      "id, author_id, title, tags, prep_time_minutes, servings, author:author_id(display_name)"
+      "id, author_id, title, tags, prep_time_minutes, servings, photo_url, author:author_id(display_name)"
     )
     .order("created_at", { ascending: false });
 
@@ -130,7 +130,15 @@ export default async function RecipesPage({
   }
 
   const { data: recipes } = await query;
-  const allRecipes = recipes ?? [];
+  const allRecipes = await Promise.all(
+    (recipes ?? []).map(async (r: any) => {
+      if (!r.photo_url) return { ...r, thumbUrl: null };
+      const { data } = await supabase.storage
+        .from("recipe-photos")
+        .createSignedUrl(r.photo_url, 60 * 60);
+      return { ...r, thumbUrl: data?.signedUrl ?? null };
+    })
+  );
 
   // ---- Tag chips: frequency-sorted across the current result set ----
   const tagCounts = new Map<string, number>();
@@ -185,8 +193,13 @@ export default async function RecipesPage({
   return (
     <main className="max-w-2xl mx-auto px-6 py-12">
       <div className="flex items-center justify-between mb-6">
-        <h1 className="font-display text-3xl">Table</h1>
+        <Link href="/">
+          <h1 className="font-display text-3xl">Table</h1>
+        </Link>
         <div className="flex gap-4 text-sm">
+          <Link href="/restaurants" className="text-table-400 hover:text-table-100">
+            Restaurants
+          </Link>
           <Link href="/lists" className="text-table-400 hover:text-table-100">
             Lists
           </Link>
@@ -326,28 +339,43 @@ export default async function RecipesPage({
                 {section.items.map((r: any) => (
                   <div
                     key={r.id}
-                    className="rounded-lg border border-table-700 bg-table-900 p-3"
+                    className="rounded-lg border border-table-700 bg-table-900 overflow-hidden"
                   >
-                    {r.author_id !== user.id && (
-                      <p className="text-[11px] text-table-500 mb-1">
-                        {labelFor(r.author_id, r.author?.display_name) ?? "Someone"}
-                      </p>
+                    {r.thumbUrl && (
+                      <Link href={`/recipes/${r.id}`}>
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img
+                          src={r.thumbUrl}
+                          alt={r.title}
+                          className="w-full h-24 object-cover"
+                        />
+                      </Link>
                     )}
-                    <Link href={`/recipes/${r.id}`} className="hover:text-herb-400">
-                      <p className="text-sm font-medium mb-1">{r.title}</p>
-                    </Link>
-                    {r.prep_time_minutes && (
-                      <p className="text-[11px] text-table-500 mb-1.5">
-                        <i className="ti ti-clock" style={{ fontSize: 11 }} />{" "}
-                        {r.prep_time_minutes} min
-                      </p>
-                    )}
-                    {r.author_id !== user.id && (
-                      <FavoriteButton
-                        recipeId={r.id}
-                        initialFavorited={myFavoritedRecipeIds.has(r.id)}
-                      />
-                    )}
+                    <div className="p-3">
+                      {r.author_id !== user.id && (
+                        <Link
+                          href={`/recipes/friend/${r.author_id}`}
+                          className="text-[11px] text-table-500 hover:text-herb-400 mb-1 block"
+                        >
+                          {labelFor(r.author_id, r.author?.display_name) ?? "Someone"}
+                        </Link>
+                      )}
+                      <Link href={`/recipes/${r.id}`} className="hover:text-herb-400">
+                        <p className="text-sm font-medium mb-1">{r.title}</p>
+                      </Link>
+                      {r.prep_time_minutes && (
+                        <p className="text-[11px] text-table-500 mb-1.5">
+                          <i className="ti ti-clock" style={{ fontSize: 11 }} />{" "}
+                          {r.prep_time_minutes} min
+                        </p>
+                      )}
+                      {r.author_id !== user.id && (
+                        <FavoriteButton
+                          recipeId={r.id}
+                          initialFavorited={myFavoritedRecipeIds.has(r.id)}
+                        />
+                      )}
+                    </div>
                   </div>
                 ))}
               </div>

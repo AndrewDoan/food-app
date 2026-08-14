@@ -1,20 +1,25 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import TagInput from "@/components/TagInput";
 
 type Ingredient = { name: string; amount: string; unit: string };
 type TagSuggestion = { tag: string; count: number };
 
-export default function NewRecipePage() {
+export default function EditRecipePage() {
   const router = useRouter();
+  const params = useParams();
+  const recipeId = params.id as string;
   const supabase = createClient();
 
+  const [loading, setLoading] = useState(true);
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
-  const [photoFile, setPhotoFile] = useState<File | null>(null);
+  const [existingPhotoPath, setExistingPhotoPath] = useState<string | null>(null);
+  const [existingPhotoUrl, setExistingPhotoUrl] = useState<string | null>(null);
+  const [newPhotoFile, setNewPhotoFile] = useState<File | null>(null);
   const [ingredients, setIngredients] = useState<Ingredient[]>([
     { name: "", amount: "", unit: "" },
   ]);
@@ -28,9 +33,48 @@ export default function NewRecipePage() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    async function load() {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      if (!user) return;
+
+      const { data: recipe } = await supabase
+        .from("recipes")
+        .select("*")
+        .eq("id", recipeId)
+        .single();
+
+      if (!recipe || recipe.author_id !== user.id) {
+        // Not found, or not yours -- send back to the recipe's own page.
+        router.push(`/recipes/${recipeId}`);
+        return;
+      }
+
+      setTitle(recipe.title ?? "");
+      setDescription(recipe.description ?? "");
+      setIngredients(
+        recipe.ingredients?.length ? recipe.ingredients : [{ name: "", amount: "", unit: "" }]
+      );
+      setSteps(recipe.steps?.length ? recipe.steps : [""]);
+      setTags(recipe.tags ?? []);
+      setPrepTime(recipe.prep_time_minutes?.toString() ?? "");
+      setServings(recipe.servings?.toString() ?? "");
+      setNotes(recipe.notes ?? "");
+      setExistingPhotoPath(recipe.photo_url);
+
+      if (recipe.photo_url) {
+        const { data } = await supabase.storage
+          .from("recipe-photos")
+          .createSignedUrl(recipe.photo_url, 60 * 60);
+        setExistingPhotoUrl(data?.signedUrl ?? null);
+      }
+
+      setLoading(false);
+    }
+    load();
+
     async function loadTagSuggestions() {
-      // RLS already scopes this to recipes we can see (own + friends'),
-      // so the suggestion list is automatically our circle's vocabulary.
       const { data } = await supabase.from("recipes").select("tags");
       const counts = new Map<string, number>();
       (data ?? []).forEach((row) =>
@@ -43,7 +87,7 @@ export default function NewRecipePage() {
       );
     }
     loadTagSuggestions();
-  }, [supabase]);
+  }, [recipeId, supabase, router]);
 
   function updateIngredient(i: number, field: keyof Ingredient, value: string) {
     setIngredients((prev) =>
@@ -69,41 +113,54 @@ export default function NewRecipePage() {
       return;
     }
 
-    let photoPath: string | null = null;
-    if (photoFile) {
-      const ext = photoFile.name.split(".").pop();
+    let photoPath = existingPhotoPath;
+    if (newPhotoFile) {
+      const ext = newPhotoFile.name.split(".").pop();
       const path = `${user.id}/${crypto.randomUUID()}.${ext}`;
       const { error: uploadError } = await supabase.storage
         .from("recipe-photos")
-        .upload(path, photoFile);
-
+        .upload(path, newPhotoFile);
       if (uploadError) {
         setError(`Photo upload failed: ${uploadError.message}`);
         setSaving(false);
         return;
       }
+      // Clean up the old photo now that the new one is safely uploaded.
+      if (existingPhotoPath) {
+        await supabase.storage.from("recipe-photos").remove([existingPhotoPath]);
+      }
       photoPath = path;
     }
 
-    const { error: insertError } = await supabase.from("recipes").insert({
-      author_id: user.id,
-      title,
-      description,
-      ingredients: ingredients.filter((i) => i.name.trim()),
-      steps: steps.filter((s) => s.trim()),
-      photo_url: photoPath,
-      tags,
-      prep_time_minutes: prepTime ? parseInt(prepTime, 10) : null,
-      servings: servings ? parseInt(servings, 10) : null,
-      notes: notes || null,
-    });
+    const { error: updateError } = await supabase
+      .from("recipes")
+      .update({
+        title,
+        description,
+        ingredients: ingredients.filter((i) => i.name.trim()),
+        steps: steps.filter((s) => s.trim()),
+        tags,
+        prep_time_minutes: prepTime ? parseInt(prepTime, 10) : null,
+        servings: servings ? parseInt(servings, 10) : null,
+        notes: notes || null,
+        photo_url: photoPath,
+      })
+      .eq("id", recipeId);
 
     setSaving(false);
-    if (insertError) {
-      setError(insertError.message);
+    if (updateError) {
+      setError(updateError.message);
     } else {
-      router.push("/recipes");
+      router.push(`/recipes/${recipeId}`);
     }
+  }
+
+  if (loading) {
+    return (
+      <main className="max-w-lg mx-auto px-6 py-12">
+        <p className="text-table-500 text-sm">Loading…</p>
+      </main>
+    );
   }
 
   return (
@@ -115,7 +172,7 @@ export default function NewRecipePage() {
       >
         ← Cancel
       </button>
-      <h1 className="font-display text-3xl mb-8">Share a recipe</h1>
+      <h1 className="font-display text-3xl mb-8">Edit recipe</h1>
 
       <form onSubmit={handleSubmit} className="space-y-6">
         <div>
@@ -129,9 +186,7 @@ export default function NewRecipePage() {
         </div>
 
         <div>
-          <label className="block text-sm text-table-400 mb-1">
-            Description (optional)
-          </label>
+          <label className="block text-sm text-table-400 mb-1">Description</label>
           <textarea
             value={description}
             onChange={(e) => setDescription(e.target.value)}
@@ -141,22 +196,26 @@ export default function NewRecipePage() {
         </div>
 
         <div>
-          <label className="block text-sm text-table-400 mb-1">
-            Photo (optional)
-          </label>
+          <label className="block text-sm text-table-400 mb-1">Photo</label>
+          {(newPhotoFile || existingPhotoUrl) && (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={newPhotoFile ? URL.createObjectURL(newPhotoFile) : existingPhotoUrl!}
+              alt=""
+              className="w-full max-h-64 object-contain bg-table-950 rounded-lg mb-2"
+            />
+          )}
           <input
             type="file"
             accept="image/*"
-            onChange={(e) => setPhotoFile(e.target.files?.[0] ?? null)}
+            onChange={(e) => setNewPhotoFile(e.target.files?.[0] ?? null)}
             className="w-full text-sm text-table-400 file:mr-3 file:rounded-md file:border-0 file:bg-table-800 file:px-3 file:py-1.5 file:text-table-100 file:text-sm"
           />
         </div>
 
         <div className="flex gap-4">
           <div className="flex-1">
-            <label className="block text-sm text-table-400 mb-1">
-              Prep time (min)
-            </label>
+            <label className="block text-sm text-table-400 mb-1">Prep time (min)</label>
             <input
               type="number"
               min="0"
@@ -243,7 +302,7 @@ export default function NewRecipePage() {
         </div>
 
         <div>
-          <label className="block text-sm text-table-400 mb-1">Notes (optional)</label>
+          <label className="block text-sm text-table-400 mb-1">Notes</label>
           <textarea
             value={notes}
             onChange={(e) => setNotes(e.target.value)}
@@ -259,7 +318,7 @@ export default function NewRecipePage() {
           disabled={saving}
           className="w-full rounded-md bg-herb-600 hover:bg-herb-500 transition-colors px-4 py-3 font-medium disabled:opacity-50"
         >
-          {saving ? "Sharing…" : "Share with friends"}
+          {saving ? "Saving…" : "Save changes"}
         </button>
       </form>
     </main>

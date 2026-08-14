@@ -88,17 +88,28 @@ export default async function RecipeDetailPage({
 
       <div className="flex items-start justify-between gap-3 mt-4 mb-1">
         <div>
-          <p className="text-xs text-table-500 mb-1">
+          <Link
+            href={`/recipes/friend/${recipe.author_id}`}
+            className="text-xs text-table-500 hover:text-herb-400 mb-1 block"
+          >
             {(recipe.author as any)?.display_name ?? "Someone"}
-          </p>
+          </Link>
           <h1 className="font-display text-3xl">{recipe.title}</h1>
         </div>
         {isOwner && (
-          <DeleteRecipeButton
-            recipeId={recipe.id}
-            photoPath={recipe.photo_url}
-            redirectTo="/recipes"
-          />
+          <div className="flex items-center gap-3">
+            <Link
+              href={`/recipes/${recipe.id}/edit`}
+              className="text-xs text-table-500 hover:text-table-300"
+            >
+              Edit
+            </Link>
+            <DeleteRecipeButton
+              recipeId={recipe.id}
+              photoPath={recipe.photo_url}
+              redirectTo="/recipes"
+            />
+          </div>
         )}
       </div>
 

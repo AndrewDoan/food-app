@@ -80,12 +80,16 @@ state), not just the steady state.
   suggested cuisine/type list), `prep_time_minutes`, `servings`, `notes`.
   No `list_id` column — see `list_items` below.
 - `restaurant_reviews` — restaurant name/address/lat/long, rating, tags,
-  notes. Includes a `place_id` from a place-lookup provider (e.g. Google
-  Places) — this is what will make it possible to reliably tell that two
-  different reviews are about the *same physical restaurant*, so they can
-  be grouped/collapsed together later. Matching on typed name/address
-  alone would be too fragile (formatting differences, slightly different
-  GPS pins).
+  `review_text` (the write-up) separate from `notes` (quick practical
+  tips — same description/notes split as recipes), and `photo_urls`
+  (array of storage paths, capped at 5 via a check constraint). Includes
+  a `place_id` from Google Places — this is what makes it possible to
+  reliably tell that two different reviews are about the *same physical
+  restaurant* (matching on typed name/address alone would be too
+  fragile). The **first** entry in `photo_urls` is the "primary" photo
+  used as the thumbnail — order in the array *is* the meaning; there's
+  no separate `is_primary` flag, "make primary" in the UI just reorders
+  the array.
 - `list_items` — many-to-many join: a recipe or review can belong to
   **multiple** lists at once, and a list can hold many items
   (`recipe_id` xor `review_id` per row, enforced by a check constraint).
@@ -150,6 +154,19 @@ it's a *habit*: after any multi-statement migration, explicitly query
 `pg_policies` (and check grants) for the affected table(s) rather than
 trusting that "no red error at the end" means "everything ran."
 
+**6. "Back" links that weren't actually back**
+Root cause: several pages (Profile, and initially the create/edit forms)
+used a `<Link href="/recipes">` labeled "← Back" — which always goes to
+one hardcoded place, regardless of where the person actually came from.
+Reached Profile from the hub, or from a friend's page, or from
+Restaurants? Didn't matter — "Back" always dumped you on `/recipes`.
+Fix: swapped hardcoded destination links for `router.back()` (real
+browser-history back) wherever the label says "Back" or "Cancel."
+*Lesson:* a Link with a fixed `href` and a button that calls
+`router.back()` look identical in the UI but mean different things — the
+label "Back" is a promise about *history*, not a promise about a specific
+route, and only one of those two implementations keeps that promise.
+
 ---
 
 ## Product decisions worth being able to explain
@@ -210,7 +227,50 @@ for this to feel like a person's own space rather than a search result.
 Your own collection uses this exact same route/component
 (`/recipes/friend/<your-own-id>`) rather than a separate "my recipes" UI
 — "Me" is just another person in the same system, which the RLS logic
-already treated as true (`own or friend's`).
+already treated as true (`own or friend's`). Author names/nicknames
+shown anywhere (cards, detail pages) link here too, including on your
+own content — clicking your own name just goes to your own page, which
+is harmless and occasionally useful rather than something worth special-
+casing away.
+
+**Google Places is called through a server-side proxy, never from the
+browser directly.** `/api/places/search` holds the API key server-side
+(`GOOGLE_PLACES_API_KEY`, no `NEXT_PUBLIC_` prefix) and the client only
+ever talks to that route. Same security posture as everything else in
+this app: secrets stay on the server. The alternative — calling Google's
+Places JS SDK straight from the browser — would expose the key and
+require locking it down with HTTP-referrer restrictions instead; the
+proxy avoids that class of problem entirely.
+
+**Restaurants page was deliberately scoped down from Recipes.** Recipes
+has per-friend dedicated pages and Lists filter tabs; Restaurants (built
+in the same session as the Places integration) intentionally shipped
+*without* those — just search, tag chips, and the 4-tier ranking — to
+get the core feature working end-to-end first. This was a conscious cut,
+not an oversight: better to have a working, smaller Restaurants page than
+a half-built one matching Recipes' full feature set. Bringing it up to
+parity is explicit future work, not a bug.
+
+**Tag suggestions are sourced from an unfiltered RLS query, for free.**
+The tag input (shared between recipe and review forms) suggests
+previously-used tags, sorted by frequency. The suggestion query is just
+`select tags from recipes` (or `restaurant_reviews`) with **no manual
+friend-filtering at all** — RLS already restricts that query to rows the
+signed-in user can see (their own + friends'), so the suggestion pool is
+automatically "my circle's vocabulary" without writing that logic twice.
+A good example of RLS doing double duty: it's not just an access-control
+mechanism, it's also implicitly the right scope for a feature that has
+nothing to do with security on its face.
+
+**Multi-photo "make primary" needed one unified list, not two.** The
+review edit form tracks existing (already-uploaded) photos separately
+from newly-added ones during editing — but letting the user promote
+*either* kind to be the main photo meant both needed to live in one
+single, reorderable array (a small discriminated union: `{type:
+"existing", path, url} | {type: "new", file}`), with final save order
+walking that one list in sequence. Keeping them as two separate arrays
+(as the very first version did) made it impossible for a newly-added
+photo to ever end up before an existing one.
 
 ---
 
@@ -240,26 +300,76 @@ wrong thing. It's now built:
 - **`/recipes/[id]`** — recipe detail page: full ingredients/steps/notes,
   a favorite toggle (friends' recipes) or a multi-select Lists checklist
   (any recipe you can see, own or friend's) to file it into any number of
-  your own lists at once.
+  your own lists at once. Edit and delete for the author (edit form now
+  collects tags/prep-time/servings/notes too — the original creation form
+  had shipped without them, a real gap since the database and detail page
+  already supported those fields with no way to actually set them).
 - **`/lists`** — manage all your Lists in one place: create new, and an
   accordion per list (expand in place rather than navigating away) to
   rename, delete, or remove individual items — reusing the same
   components as the recipe detail page's list picker.
+- **Landing hub (`/`)** — a real hub page (two tiles: Recipes,
+  Restaurants) rather than redirecting straight into Recipes, matching
+  the original two-feature product concept instead of treating Recipes
+  as the default.
+
+---
+
+## Restaurant reviews (built)
+
+Built in one long session together with the Google Places integration —
+the biggest single feature addition so far:
+
+- **Review creation/edit** — search a real restaurant via Google Places
+  (server-proxied, see below) instead of the earlier raw-geolocation
+  approach; rating; up to 5 photos with a "make primary" control (tap a
+  star to promote any photo — existing or newly added — to be the
+  thumbnail); a **Review** write-up separate from quick **Notes**; tags
+  with the same frequency-sorted suggestions as recipes.
+- **`/restaurants`** — search, tag chips, the same 4-tier ranking as
+  Recipes (in your lists / your reviews / favorited / more from friends).
+  Deliberately scoped smaller than Recipes for now — no per-friend pages
+  or Lists tabs yet (see "Product decisions").
+- **`/reviews/[id]`** — detail page: photo gallery, full review/notes
+  text, rating, tags, a favorite toggle or Lists checklist depending on
+  ownership, edit/delete for the author.
+- **Google Places integration** — `/api/places/search` is a small
+  server-side proxy (Next.js Route Handler) that holds the API key and
+  forwards text search requests to Places API (New). The client never
+  talks to Google directly.
 
 ---
 
 ## Not yet built
 
-- Restaurant browse/search page and detail page (the recipe-side pattern
-  above is designed to be closely reusable here once built)
-- Restaurant review form rework (place-lookup instead of raw geolocation
-  — the current form captures *your* GPS as a stand-in for the
-  restaurant's location, which needs to become a real place search)
 - Restaurant "collapse same restaurant into one card" via `place_id`
-  (schema supports it; no UI yet)
-- Recipe edit (delete exists, edit doesn't)
+  when multiple friends review the same place — schema fully supports
+  this (`place_id` is stable and shared across reviews of the same
+  restaurant); no grouping UI built yet
+- Location search for restaurants ("near Tokyo" vs. "near me right
+  now") and any map/radius view — current search is Places text search
+  only, no geo-distance query yet. This is the one still-missing piece
+  that matters most for the "traveling somewhere, what have friends
+  reviewed nearby" use case the whole restaurant feature was originally
+  imagined for.
+- Recipe multi-photo (recipes still support exactly one photo; reviews
+  got multi-photo + "make primary" first)
 - QR-code add-friend flow
 - Possible "You Pick" rename
+- `/recipes/friend/[id]` route rename — this page now shows both
+  Recipes and Restaurants tabs for a person, so the URL living under
+  `/recipes/...` is a bit of a misnomer (a leftover from when it only
+  showed recipes). Something like `/people/[id]` would read better.
+  Small, low-risk rename — just needs every internal link updated to
+  match. Good quick-win task to start a future session with.
+
+## Recently resolved (kept here briefly for context)
+
+- ~~Dedicated per-friend restaurant pages~~ — solved differently than
+  planned: rather than a separate `/restaurants/friend/[id]` route,
+  restaurant reviews were folded into the *same* `/recipes/friend/[id]`
+  page as a second tab (Recipes / Restaurants), sharing one header,
+  search bar, and Lists-tabs pattern instead of duplicating a whole page.
 
 ## Known deferred items
 
@@ -267,7 +377,7 @@ wrong thing. It's now built:
   Needs a deliberate, tested upgrade to latest before any public
   deployment or real user onboarding — not urgent for continued local
   development.
-- Place-lookup/geocoding provider (likely Google Places) not yet chosen
-  or set up — needed for restaurant location search, review-time
-  restaurant selection, and reliable same-restaurant collapsing. Real
-  paid third-party dependency, worth its own deliberate setup session.
+- Google Places billing is live on a real Google Cloud project (free
+  tier covers development usage) — worth keeping an eye on usage before
+  any public deployment, and revisiting the API key's restrictions at
+  that point too.

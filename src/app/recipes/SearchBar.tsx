@@ -3,7 +3,13 @@
 import { useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 
-export default function SearchBar({ basePath = "/recipes" }: { basePath?: string }) {
+export default function SearchBar({
+  basePath = "/recipes",
+  placeholder = "Search recipes by name or tag…",
+}: {
+  basePath?: string;
+  placeholder?: string;
+}) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [q, setQ] = useState(searchParams.get("q") ?? "");
@@ -44,7 +50,7 @@ export default function SearchBar({ basePath = "/recipes" }: { basePath?: string
       <input
         value={q}
         onChange={handleChange}
-        placeholder="Search recipes by name or tag…"
+        placeholder={placeholder}
         className="flex-1 rounded-md bg-table-900 border border-table-700 px-3 py-2 text-sm focus:border-herb-500"
       />
     </form>
