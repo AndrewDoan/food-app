@@ -84,7 +84,7 @@ export default function PlaceSearch({
       />
       {loading && <p className="text-xs text-table-500 mt-1">Searching…</p>}
       {results.length > 0 && (
-        <div className="absolute z-10 w-full mt-1 rounded-md border border-table-700 bg-table-900 overflow-hidden">
+        <div className="absolute z-10 w-full mt-1 rounded-md border border-table-700 bg-table-900 overflow-hidden card-surface">
           {results.map((p) => (
             <button
               key={p.placeId}

@@ -11,3 +11,60 @@
   outline: 2px solid theme("colors.herb.400");
   outline-offset: 2px;
 }
+
+/* A warm glow behind the whole app -- like the one lamp over a table
+   at night. Strong enough to actually read against a near-black
+   background, not just a token gesture. */
+body {
+  position: relative;
+}
+
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background:
+    radial-gradient(
+      ellipse 1100px 650px at 50% -10%,
+      rgba(124, 146, 105, 0.16),
+      transparent 60%
+    ),
+    radial-gradient(
+      ellipse 800px 600px at 100% 100%,
+      rgba(140, 100, 50, 0.14),
+      transparent 55%
+    );
+}
+
+/* Smooth, consistent interactive feedback across the app -- buttons,
+   links, and cards should never feel like they're snapping into a new
+   state. */
+a,
+button {
+  transition: color 0.15s ease, background-color 0.15s ease, border-color 0.15s ease,
+    opacity 0.15s ease;
+}
+
+/* Reusable card surface. On a dark theme, a BLACK drop shadow has
+   almost no contrast against an already-near-black page and is
+   essentially invisible -- the visible cue instead is a light rim
+   (like a card catching a little light from above) plus a genuinely
+   dark cast shadow for grounding. */
+.card-surface {
+  box-shadow:
+    0 1px 0 0 rgba(255, 255, 255, 0.08) inset,
+    0 0 0 1px rgba(255, 255, 255, 0.03) inset,
+    0 10px 28px -10px rgba(0, 0, 0, 0.65);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

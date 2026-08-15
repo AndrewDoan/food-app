@@ -363,7 +363,7 @@ export default async function FriendPage({
                   {section.items.map((r: any) => (
                     <div
                       key={r.id}
-                      className="rounded-lg border border-table-700 bg-table-900 overflow-hidden"
+                      className="rounded-lg border border-table-700 bg-table-900 card-surface overflow-hidden"
                     >
                       {r.thumbUrl && (
                         <Link href={`/recipes/${r.id}`}>
@@ -400,7 +400,7 @@ export default async function FriendPage({
                   {section.items.map((r: any) => (
                     <div
                       key={r.id}
-                      className="rounded-lg border border-table-700 bg-table-900 p-3 flex gap-3"
+                      className="rounded-lg border border-table-700 bg-table-900 card-surface p-3 flex gap-3"
                     >
                       {r.thumbUrl ? (
                         <Link href={`/reviews/${r.id}`} className="flex-shrink-0">

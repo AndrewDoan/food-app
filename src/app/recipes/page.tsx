@@ -391,53 +391,79 @@ export default async function RecipesPage({
       )}
 
       {sections.length === 0 ? (
-        <p className="text-table-500">
-          Nothing matches yet. Try a different search, or add a friend to see more.
-        </p>
+        <div className="text-center py-16">
+          <i className="ti ti-tools-kitchen-2" style={{ fontSize: 32, color: "#3a352c" }} />
+          <p className="text-table-500 mt-3">
+            Nothing here yet. Try a different search, or share your first recipe.
+          </p>
+        </div>
       ) : (
-        <div className="space-y-8">
+        <div className="space-y-10">
           {sections.map((section) => (
             <div key={section.key}>
-              <p className="text-xs font-medium text-table-400 mb-2">{section.label}</p>
-              <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+              <p className="text-xs font-medium text-herb-400 uppercase tracking-wide mb-3 flex items-center gap-1.5">
+                <i className="ti ti-point-filled" style={{ fontSize: 8 }} />
+                {section.label}
+              </p>
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
                 {section.items.map((r: any) => (
                   <div
                     key={r.id}
-                    className="rounded-lg border border-table-700 bg-table-900 overflow-hidden"
+                    className="rounded-xl border border-table-700 bg-table-900 card-surface overflow-hidden hover:border-herb-500 hover:-translate-y-0.5 transition-all duration-200 flex flex-col"
                   >
-                    {r.thumbUrl && (
-                      <Link href={`/recipes/${r.id}`}>
-                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <Link href={`/recipes/${r.id}`}>
+                      {r.thumbUrl ? (
+                        // eslint-disable-next-line @next/next/no-img-element
                         <img
                           src={r.thumbUrl}
                           alt={r.title}
-                          className="w-full h-24 object-cover"
+                          className="w-full h-36 object-cover"
                         />
-                      </Link>
-                    )}
-                    <div className="p-3">
+                      ) : (
+                        <div className="w-full h-36 bg-table-950 flex items-center justify-center">
+                          <i
+                            className="ti ti-tools-kitchen-2"
+                            style={{ fontSize: 28, color: "#3a352c" }}
+                          />
+                        </div>
+                      )}
+                    </Link>
+                    <div className="p-4 flex-1 flex flex-col">
                       {r.author_id !== user.id && (
-                        <Link
-                          href={`/people/${r.author_id}`}
-                          className="text-[11px] text-table-500 hover:text-herb-400 mb-1 block"
-                        >
+                        <span className="text-[11px] text-table-500 mb-1">
                           {labelFor(r.author_id, r.author?.display_name) ?? "Someone"}
-                        </Link>
+                        </span>
                       )}
                       <Link href={`/recipes/${r.id}`} className="hover:text-herb-400">
-                        <p className="text-sm font-medium mb-1">{r.title}</p>
+                        <p className="font-display text-lg leading-tight mb-1.5">{r.title}</p>
                       </Link>
-                      {r.prep_time_minutes && (
-                        <p className="text-[11px] text-table-500 mb-1.5">
-                          <i className="ti ti-clock" style={{ fontSize: 11 }} />{" "}
-                          {r.prep_time_minutes} min
-                        </p>
+                      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-table-500 mb-2">
+                        {r.prep_time_minutes && (
+                          <span className="flex items-center gap-1">
+                            <i className="ti ti-clock" style={{ fontSize: 12 }} />
+                            {r.prep_time_minutes} min
+                          </span>
+                        )}
+                      </div>
+                      {r.tags && r.tags.length > 0 && (
+                        <div className="flex flex-wrap gap-1.5 mb-2">
+                          {r.tags.slice(0, 2).map((t: string) => (
+                            <span
+                              key={t}
+                              className="text-[10px] bg-herb-600/15 text-herb-400 px-2 py-0.5 rounded-full font-medium"
+                            >
+                              {t}
+                            </span>
+                          ))}
+                        </div>
                       )}
                       {r.author_id !== user.id && (
-                        <FavoriteButton
-                          recipeId={r.id}
-                          initialFavorited={myFavoritedRecipeIds.has(r.id)}
-                        />
+                        <div className="mt-auto pt-1">
+                          <FavoriteButton
+                            recipeId={r.id}
+                            initialFavorited={myFavoritedRecipeIds.has(r.id)}
+                          />
+                        </div>
                       )}
                     </div>
                   </div>

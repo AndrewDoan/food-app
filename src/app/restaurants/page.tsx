@@ -187,26 +187,19 @@ export default async function RestaurantsPage({
     .eq("user_id", user.id);
   const myFavoritedReviewIds = new Set((myFavorites ?? []).map((f) => f.review_id));
 
-  const tiers: Record<1 | 2 | 3 | 4, any[]> = { 1: [], 2: [], 3: [], 4: [] };
-  for (const r of allReviews) {
-    if (myListedReviewIds.has(r.id)) tiers[1].push(r);
-    else if (r.author_id === user.id) tiers[2].push(r);
-    else if (myFavoritedReviewIds.has(r.id)) tiers[3].push(r);
-    else tiers[4].push(r);
+  // ---- Group reviews by place (restaurant), not by individual review --
+  // Two friends reviewing the same restaurant become ONE card/marker,
+  // not two. A group's tier is the BEST tier among its member reviews --
+  // e.g. a place where you have your own listed review AND a friend's
+  // untouched one still shows up under "In your lists," since that's
+  // the most you've engaged with it.
+  function reviewTier(r: any): 1 | 2 | 3 | 4 {
+    if (myListedReviewIds.has(r.id)) return 1;
+    if (r.author_id === user.id) return 2;
+    if (myFavoritedReviewIds.has(r.id)) return 3;
+    return 4;
   }
 
-  const sections = [
-    { key: 1, label: "In your lists", items: tiers[1] },
-    { key: 2, label: "Your reviews", items: tiers[2] },
-    { key: 3, label: "Favorited", items: tiers[3] },
-    { key: 4, label: "More from friends", items: tiers[4] },
-  ].filter((s) => s.items.length > 0);
-
-  // Map markers use every currently-filtered review, regardless of tier
-  // -- tiering is a "how much have I engaged with this" ranking, which
-  // doesn't map cleanly onto a spatial view. Grouped by place_id so two
-  // friends reviewing the same restaurant show as ONE marker, not two
-  // overlapping pins at the same spot.
   const placeGroups = new Map<
     string,
     {
@@ -214,32 +207,79 @@ export default async function RestaurantsPage({
       address: string;
       lat: number;
       lng: number;
-      reviews: { id: string; rating: number; authorLabel: string; isMine: boolean }[];
+      tier: 1 | 2 | 3 | 4;
+      reviews: {
+        id: string;
+        rating: number;
+        authorLabel: string;
+        isMine: boolean;
+        thumbUrl: string | null;
+        reviewText: string | null;
+        tags: string[];
+        tier: 1 | 2 | 3 | 4;
+        distance: number | null;
+      }[];
     }
   >();
   allReviews.forEach((r: any) => {
     if (r.latitude == null || r.longitude == null) return;
     const key = r.place_id ?? r.id; // fall back to review id if place_id somehow missing
+    const tier = reviewTier(r);
     if (!placeGroups.has(key)) {
       placeGroups.set(key, {
         name: r.restaurant_name,
         address: r.address ?? "",
         lat: r.latitude,
         lng: r.longitude,
+        tier,
         reviews: [],
       });
     }
-    placeGroups.get(key)!.reviews.push({
+    const group = placeGroups.get(key)!;
+    group.tier = Math.min(group.tier, tier) as 1 | 2 | 3 | 4; // best tier wins
+    group.reviews.push({
       id: r.id,
       rating: r.rating,
       authorLabel:
         r.author_id === user.id ? "You" : labelFor(r.author_id, r.author?.display_name),
       isMine: r.author_id === user.id,
+      thumbUrl: r.thumbUrl,
+      reviewText: r.review_text,
+      tags: r.tags ?? [],
+      tier,
+      distance: r.distance as number | null,
     });
   });
-  const mapResults = [...placeGroups.entries()].map(([placeId, group]) => ({
+
+  const allPlaceGroups = [...placeGroups.entries()].map(([placeId, group]) => ({
     placeId,
     ...group,
+  }));
+
+  const sections = [
+    { key: 1, label: "In your lists", items: allPlaceGroups.filter((g) => g.tier === 1) },
+    { key: 2, label: "Your reviews", items: allPlaceGroups.filter((g) => g.tier === 2) },
+    { key: 3, label: "Favorited", items: allPlaceGroups.filter((g) => g.tier === 3) },
+    {
+      key: 4,
+      label: "More from friends",
+      items: allPlaceGroups.filter((g) => g.tier === 4),
+    },
+  ].filter((s) => s.items.length > 0);
+
+  // The map only needs the lightweight projection.
+  const mapResults = allPlaceGroups.map((g) => ({
+    placeId: g.placeId,
+    name: g.name,
+    address: g.address,
+    lat: g.lat,
+    lng: g.lng,
+    reviews: g.reviews.map((r) => ({
+      id: r.id,
+      rating: r.rating,
+      authorLabel: r.authorLabel,
+      isMine: r.isMine,
+    })),
   }));
 
   const mapCenter = hasLocation ? { lat: myLat!, lng: myLng! } : null;
@@ -432,95 +472,131 @@ export default async function RestaurantsPage({
       )}
 
       {sections.length === 0 ? (
-        <p className="text-table-500">
-          Nothing matches yet. Try a different search, or add a friend to see more.
-        </p>
+        <div className="text-center py-16">
+          <i className="ti ti-map-pin" style={{ fontSize: 32, color: "#3a352c" }} />
+          <p className="text-table-500 mt-3">
+            Nothing here yet. Try a different search, or share your first review.
+          </p>
+        </div>
       ) : (
-        <div className="space-y-8">
+        <div className="space-y-10">
           {sections.map((section) => (
             <div key={section.key}>
-              <p className="text-xs font-medium text-table-400 mb-2">{section.label}</p>
+              <p className="text-xs font-medium text-herb-400 uppercase tracking-wide mb-3 flex items-center gap-1.5">
+                <i className="ti ti-point-filled" style={{ fontSize: 8 }} />
+                {section.label}
+              </p>
               <div className="space-y-3">
-                {section.items.map((r: any) => (
-                  <div
-                    key={r.id}
-                    className="rounded-lg border border-table-700 bg-table-900 p-3 flex gap-3"
-                  >
-                    {r.thumbUrl ? (
-                      <Link href={`/reviews/${r.id}`} className="flex-shrink-0">
-                        {/* eslint-disable-next-line @next/next/no-img-element */}
-                        <img
-                          src={r.thumbUrl}
-                          alt={r.restaurant_name}
-                          className="w-20 h-20 rounded-md object-contain bg-table-950"
-                        />
-                      </Link>
-                    ) : (
+                {section.items.map((g: any) => {
+                  const primaryThumb = g.reviews.find((rv: any) => rv.thumbUrl)?.thumbUrl ?? null;
+                  const isSingle = g.reviews.length === 1;
+                  const single = isSingle ? g.reviews[0] : null;
+
+                  return (
+                    <div
+                      key={g.placeId}
+                      className="rounded-xl border border-table-700 bg-table-900 card-surface p-4 flex gap-4 hover:border-herb-500/50 transition-colors duration-200"
+                    >
                       <Link
-                        href={`/reviews/${r.id}`}
-                        className="w-20 h-20 rounded-md bg-table-950 flex items-center justify-center flex-shrink-0"
+                        href={`/reviews/${g.reviews[0].id}`}
+                        className="flex-shrink-0"
                       >
-                        <i
-                          className="ti ti-tools-kitchen-2"
-                          style={{ fontSize: 24, color: "#524b3d" }}
-                        />
+                        {primaryThumb ? (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img
+                            src={primaryThumb}
+                            alt={g.name}
+                            className="w-24 h-24 rounded-lg object-contain bg-table-950"
+                          />
+                        ) : (
+                          <div className="w-24 h-24 rounded-lg bg-table-950 flex items-center justify-center">
+                            <i
+                              className="ti ti-tools-kitchen-2"
+                              style={{ fontSize: 26, color: "#524b3d" }}
+                            />
+                          </div>
+                        )}
                       </Link>
-                    )}
-                    <div className="flex-1 min-w-0 flex flex-col">
-                    <div className="flex items-start justify-between gap-2 mb-1">
-                      <div>
-                        {r.author_id !== user.id && (
-                          <Link
-                            href={`/people/${r.author_id}`}
-                            className="text-[11px] text-table-500 hover:text-herb-400 block"
-                          >
-                            {labelFor(r.author_id, r.author?.display_name)}
-                          </Link>
+
+                      <div className="flex-1 min-w-0 flex flex-col">
+                        <div className="flex items-start justify-between gap-2 mb-1">
+                          <div>
+                            {isSingle && !single!.isMine && (
+                              <p className="text-[11px] text-table-500">{single!.authorLabel}</p>
+                            )}
+                            <p className="font-display text-lg leading-tight">
+                              <Link href={`/reviews/${g.reviews[0].id}`} className="hover:text-herb-400">
+                                {g.name}
+                              </Link>
+                            </p>
+                          </div>
+                          {isSingle && (
+                            <p className="text-xs text-table-400 flex items-center gap-1 flex-shrink-0">
+                              <i className="ti ti-star-filled" style={{ fontSize: 12, color: "#e0b04d" }} />
+                              {single!.rating}
+                              {single!.distance !== null && single!.distance !== undefined && (
+                                <span className="text-table-500 ml-1">
+                                  · {single!.distance < 0.1 ? "<0.1" : single!.distance.toFixed(1)} mi
+                                </span>
+                              )}
+                            </p>
+                          )}
+                        </div>
+
+                        {isSingle ? (
+                          <>
+                            {single!.reviewText && (
+                              <p className="text-xs text-table-400 mt-1 line-clamp-2">
+                                {single!.reviewText}
+                              </p>
+                            )}
+                            {single!.tags.length > 0 && (
+                              <div className="flex flex-wrap gap-1.5 mt-2">
+                                {single!.tags.map((t: string) => (
+                                  <span
+                                    key={t}
+                                    className="text-[10px] bg-herb-600/15 text-herb-400 px-2 py-0.5 rounded-full font-medium"
+                                  >
+                                    {t}
+                                  </span>
+                                ))}
+                              </div>
+                            )}
+                            {!single!.isMine && (
+                              <div className="mt-auto pt-2">
+                                <ReviewFavoriteButton
+                                  reviewId={single!.id}
+                                  initialFavorited={myFavoritedReviewIds.has(single!.id)}
+                                />
+                              </div>
+                            )}
+                          </>
+                        ) : (
+                          // Multiple friends reviewed this same restaurant --
+                          // list each one instead of a single review's detail.
+                          <div className="mt-1 space-y-1">
+                            {g.reviews.map((rv: any) => (
+                              <Link
+                                key={rv.id}
+                                href={`/reviews/${rv.id}`}
+                                className="flex items-center justify-between text-xs hover:text-herb-400"
+                              >
+                                <span className="text-table-400">{rv.authorLabel}</span>
+                                <span className="text-table-500 flex items-center gap-1">
+                                  <i
+                                    className="ti ti-star-filled"
+                                    style={{ fontSize: 10, color: "#e0b04d" }}
+                                  />
+                                  {rv.rating}
+                                </span>
+                              </Link>
+                            ))}
+                          </div>
                         )}
-                        <p className="text-sm font-medium">
-                          <Link href={`/reviews/${r.id}`} className="hover:text-herb-400">
-                            {r.restaurant_name}
-                          </Link>
-                        </p>
                       </div>
-                      <p className="text-xs text-table-400 flex items-center gap-1 flex-shrink-0">
-                        <i className="ti ti-star-filled" style={{ fontSize: 12, color: "#e0b04d" }} />
-                        {r.rating}
-                        {r.distance !== null && r.distance !== undefined && (
-                          <span className="text-table-500 ml-1">
-                            · {r.distance < 0.1 ? "<0.1" : r.distance.toFixed(1)} mi
-                          </span>
-                        )}
-                      </p>
                     </div>
-                    {r.review_text && (
-                      <p className="text-xs text-table-400 mt-1 line-clamp-2">
-                        {r.review_text}
-                      </p>
-                    )}
-                    {r.tags && r.tags.length > 0 && (
-                      <div className="flex flex-wrap gap-1.5 mt-2">
-                        {r.tags.map((t: string) => (
-                          <span
-                            key={t}
-                            className="text-[10px] bg-table-800 text-table-300 px-2 py-0.5 rounded-md"
-                          >
-                            {t}
-                          </span>
-                        ))}
-                      </div>
-                    )}
-                    {r.author_id !== user.id && (
-                      <div className="mt-auto pt-2">
-                        <ReviewFavoriteButton
-                          reviewId={r.id}
-                          initialFavorited={myFavoritedReviewIds.has(r.id)}
-                        />
-                      </div>
-                    )}
-                    </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
           ))}

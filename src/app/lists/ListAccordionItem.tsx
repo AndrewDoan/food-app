@@ -73,7 +73,7 @@ export default function ListAccordionItem({
   }
 
   return (
-    <li className="rounded-md border border-table-700 bg-table-900 overflow-hidden">
+    <li className="rounded-md border border-table-700 bg-table-900 overflow-hidden card-surface">
       <button
         onClick={() => setOpen((v) => !v)}
         className="w-full flex items-center justify-between px-4 py-3 text-left"
