@@ -2,11 +2,13 @@ import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import SearchBar from "@/app/recipes/SearchBar";
 import ReviewFavoriteButton from "./ReviewFavoriteButton";
+import LocationFilter from "./LocationFilter";
+import { haversineMiles } from "@/lib/distance";
 
 export default async function RestaurantsPage({
   searchParams,
 }: {
-  searchParams: { q?: string; tag?: string };
+  searchParams: { q?: string; tag?: string; lat?: string; lng?: string; radius?: string };
 }) {
   const supabase = createClient();
 
@@ -17,6 +19,10 @@ export default async function RestaurantsPage({
 
   const q = searchParams.q ?? "";
   const activeTag = searchParams.tag ?? "";
+  const myLat = searchParams.lat ? parseFloat(searchParams.lat) : null;
+  const myLng = searchParams.lng ? parseFloat(searchParams.lng) : null;
+  const radiusMiles = searchParams.radius ? parseFloat(searchParams.radius) : 25;
+  const hasLocation = myLat !== null && myLng !== null;
 
   // ---- Friend names/nicknames, for search matching and display -------
   const { data: friendships } = await supabase
@@ -74,7 +80,7 @@ export default async function RestaurantsPage({
   let query = supabase
     .from("restaurant_reviews")
     .select(
-      "id, author_id, restaurant_name, rating, tags, review_text, notes, photo_urls, author:author_id(display_name)"
+      "id, author_id, restaurant_name, rating, tags, review_text, notes, photo_urls, latitude, longitude, author:author_id(display_name)"
     )
     .order("created_at", { ascending: false });
 
@@ -92,16 +98,32 @@ export default async function RestaurantsPage({
   }
 
   const { data: reviews } = await query;
-  const allReviews = await Promise.all(
+  let allReviews = await Promise.all(
     (reviews ?? []).map(async (r: any) => {
       const primaryPath = r.photo_urls?.[0];
-      if (!primaryPath) return { ...r, thumbUrl: null };
-      const { data } = await supabase.storage
-        .from("review-photos")
-        .createSignedUrl(primaryPath, 60 * 60);
-      return { ...r, thumbUrl: data?.signedUrl ?? null };
+      let thumbUrl: string | null = null;
+      if (primaryPath) {
+        const { data } = await supabase.storage
+          .from("review-photos")
+          .createSignedUrl(primaryPath, 60 * 60);
+        thumbUrl = data?.signedUrl ?? null;
+      }
+      const distance =
+        hasLocation && r.latitude != null && r.longitude != null
+          ? haversineMiles(myLat!, myLng!, r.latitude, r.longitude)
+          : null;
+      return { ...r, thumbUrl, distance };
     })
   );
+
+  // When "near me" is active, drop anything outside the radius and sort
+  // what's left by distance -- closest first, overriding the usual
+  // newest-first order.
+  if (hasLocation) {
+    allReviews = allReviews
+      .filter((r) => r.distance !== null && r.distance <= radiusMiles)
+      .sort((a, b) => (a.distance ?? 0) - (b.distance ?? 0));
+  }
 
   // ---- Tag chips -------------------------------------------------------
   const tagCounts = new Map<string, number>();
@@ -178,6 +200,8 @@ export default async function RestaurantsPage({
 
       <SearchBar basePath="/restaurants" placeholder="Search restaurants by name or tag…" />
 
+      <LocationFilter />
+
       {topTags.length > 0 && (
         <div className="flex gap-2 mb-6 flex-wrap">
           {activeTag && (
@@ -232,7 +256,7 @@ export default async function RestaurantsPage({
                       <div>
                         {r.author_id !== user.id && (
                           <Link
-                            href={`/recipes/friend/${r.author_id}`}
+                            href={`/people/${r.author_id}`}
                             className="text-[11px] text-table-500 hover:text-herb-400 block"
                           >
                             {labelFor(r.author_id, r.author?.display_name)}
@@ -247,6 +271,11 @@ export default async function RestaurantsPage({
                       <p className="text-xs text-table-400 flex items-center gap-1 flex-shrink-0">
                         <i className="ti ti-star-filled" style={{ fontSize: 12, color: "#e0b04d" }} />
                         {r.rating}
+                        {r.distance !== null && r.distance !== undefined && (
+                          <span className="text-table-500 ml-1">
+                            · {r.distance < 0.1 ? "<0.1" : r.distance.toFixed(1)} mi
+                          </span>
+                        )}
                       </p>
                     </div>
                     {r.review_text && (

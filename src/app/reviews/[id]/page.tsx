@@ -86,7 +86,7 @@ export default async function ReviewDetailPage({
       <div className="flex items-start justify-between gap-3 mt-4 mb-1">
         <div>
           <Link
-            href={`/recipes/friend/${review.author_id}`}
+            href={`/people/${review.author_id}`}
             className="text-xs text-table-500 hover:text-herb-400 mb-1 block"
           >
             {(review.author as any)?.display_name ?? "Someone"}

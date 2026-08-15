@@ -356,12 +356,6 @@ the biggest single feature addition so far:
   got multi-photo + "make primary" first)
 - QR-code add-friend flow
 - Possible "You Pick" rename
-- `/recipes/friend/[id]` route rename — this page now shows both
-  Recipes and Restaurants tabs for a person, so the URL living under
-  `/recipes/...` is a bit of a misnomer (a leftover from when it only
-  showed recipes). Something like `/people/[id]` would read better.
-  Small, low-risk rename — just needs every internal link updated to
-  match. Good quick-win task to start a future session with.
 
 ## Recently resolved (kept here briefly for context)
 

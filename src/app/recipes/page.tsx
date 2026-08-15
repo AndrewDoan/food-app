@@ -239,7 +239,7 @@ export default async function RecipesPage({
         </Link>
         {(!qLower || visibleAuthorIds.has(user.id)) && (
           <Link
-            href={`/recipes/friend/${user.id}`}
+            href={`/people/${user.id}`}
             className="flex flex-col items-center gap-1.5 flex-shrink-0"
           >
             <div
@@ -257,7 +257,7 @@ export default async function RecipesPage({
           .map((f) => (
           <Link
             key={f.id}
-            href={`/recipes/friend/${f.id}`}
+            href={`/people/${f.id}`}
             className="flex flex-col items-center gap-1.5 flex-shrink-0"
           >
             <div
@@ -354,7 +354,7 @@ export default async function RecipesPage({
                     <div className="p-3">
                       {r.author_id !== user.id && (
                         <Link
-                          href={`/recipes/friend/${r.author_id}`}
+                          href={`/people/${r.author_id}`}
                           className="text-[11px] text-table-500 hover:text-herb-400 mb-1 block"
                         >
                           {labelFor(r.author_id, r.author?.display_name) ?? "Someone"}
