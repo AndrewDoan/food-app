@@ -3,6 +3,7 @@ import { createClient } from "@/lib/supabase/server";
 import SearchBar from "@/app/recipes/SearchBar";
 import ReviewFavoriteButton from "./ReviewFavoriteButton";
 import LocationFilter from "./LocationFilter";
+import RestaurantsMap from "./RestaurantsMap";
 import { haversineMiles } from "@/lib/distance";
 
 export default async function RestaurantsPage({
@@ -80,7 +81,7 @@ export default async function RestaurantsPage({
   let query = supabase
     .from("restaurant_reviews")
     .select(
-      "id, author_id, restaurant_name, rating, tags, review_text, notes, photo_urls, latitude, longitude, author:author_id(display_name)"
+      "id, author_id, place_id, restaurant_name, address, rating, tags, review_text, notes, photo_urls, latitude, longitude, author:author_id(display_name)"
     )
     .order("created_at", { ascending: false });
 
@@ -125,6 +126,13 @@ export default async function RestaurantsPage({
       .sort((a, b) => (a.distance ?? 0) - (b.distance ?? 0));
   }
 
+  // Avatars shown/highlighted based on who's actually in the current
+  // (already filtered) results, or whose name matches -- this page has
+  // no separate "scope" concept the way the recipe page once did, so
+  // the currently-visible result set already IS the right basis.
+  const visibleAuthorIds = new Set(nameMatchIds);
+  allReviews.forEach((r: any) => visibleAuthorIds.add(r.author_id));
+
   // ---- Tag chips -------------------------------------------------------
   const tagCounts = new Map<string, number>();
   allReviews.forEach((r) => {
@@ -161,10 +169,57 @@ export default async function RestaurantsPage({
     { key: 4, label: "More from friends", items: tiers[4] },
   ].filter((s) => s.items.length > 0);
 
+  // Map markers use every currently-filtered review, regardless of tier
+  // -- tiering is a "how much have I engaged with this" ranking, which
+  // doesn't map cleanly onto a spatial view. Grouped by place_id so two
+  // friends reviewing the same restaurant show as ONE marker, not two
+  // overlapping pins at the same spot.
+  const placeGroups = new Map<
+    string,
+    {
+      name: string;
+      address: string;
+      lat: number;
+      lng: number;
+      reviews: { id: string; rating: number; authorLabel: string; isMine: boolean }[];
+    }
+  >();
+  allReviews.forEach((r: any) => {
+    if (r.latitude == null || r.longitude == null) return;
+    const key = r.place_id ?? r.id; // fall back to review id if place_id somehow missing
+    if (!placeGroups.has(key)) {
+      placeGroups.set(key, {
+        name: r.restaurant_name,
+        address: r.address ?? "",
+        lat: r.latitude,
+        lng: r.longitude,
+        reviews: [],
+      });
+    }
+    placeGroups.get(key)!.reviews.push({
+      id: r.id,
+      rating: r.rating,
+      authorLabel:
+        r.author_id === user.id ? "You" : labelFor(r.author_id, r.author?.display_name),
+      isMine: r.author_id === user.id,
+    });
+  });
+  const mapResults = [...placeGroups.entries()].map(([placeId, group]) => ({
+    placeId,
+    ...group,
+  }));
+
+  const mapCenter = hasLocation ? { lat: myLat!, lng: myLng! } : null;
+
   function buildHref(overrides: Record<string, string | null>) {
     const params = new URLSearchParams();
     if (q) params.set("q", q);
     if (activeTag) params.set("tag", activeTag);
+    if (hasLocation) {
+      params.set("lat", myLat!.toString());
+      params.set("lng", myLng!.toString());
+      params.set("radius", radiusMiles.toString());
+    }
     for (const [key, value] of Object.entries(overrides)) {
       if (value === null) params.delete(key);
       else params.set(key, value);
@@ -200,7 +255,50 @@ export default async function RestaurantsPage({
 
       <SearchBar basePath="/restaurants" placeholder="Search restaurants by name or tag…" />
 
+      {/* Friend selector -- clicking jumps straight to that person's
+          Restaurants tab, since this page has no per-person scope of
+          its own the way the recipe page once did. */}
+      <div className="flex gap-3 overflow-x-auto pb-1 mb-4">
+        {(!qLower || visibleAuthorIds.has(user.id)) && (
+          <Link
+            href={`/people/${user.id}?type=restaurants`}
+            className="flex flex-col items-center gap-1.5 flex-shrink-0"
+          >
+            <div
+              className={`w-11 h-11 rounded-full flex items-center justify-center text-sm font-medium bg-table-800 text-table-400 ${
+                nameMatchIds.has(user.id) ? "ring-2 ring-herb-400" : ""
+              }`}
+            >
+              Me
+            </div>
+            <span className="text-xs text-table-500">You</span>
+          </Link>
+        )}
+        {(friendProfiles ?? [])
+          .filter((f) => !qLower || visibleAuthorIds.has(f.id))
+          .map((f) => (
+            <Link
+              key={f.id}
+              href={`/people/${f.id}?type=restaurants`}
+              className="flex flex-col items-center gap-1.5 flex-shrink-0"
+            >
+              <div
+                className={`w-11 h-11 rounded-full flex items-center justify-center text-sm font-medium bg-table-800 text-table-400 ${
+                  nameMatchIds.has(f.id) ? "ring-2 ring-herb-400" : ""
+                }`}
+              >
+                {labelFor(f.id, f.display_name)?.[0]?.toUpperCase() ?? "?"}
+              </div>
+              <span className="text-xs text-table-500 text-center w-16 leading-tight">
+                {labelFor(f.id, f.display_name)}
+              </span>
+            </Link>
+          ))}
+      </div>
+
       <LocationFilter />
+
+      <RestaurantsMap results={mapResults} center={mapCenter} />
 
       {topTags.length > 0 && (
         <div className="flex gap-2 mb-6 flex-wrap">
@@ -241,7 +339,7 @@ export default async function RestaurantsPage({
                     key={r.id}
                     className="rounded-lg border border-table-700 bg-table-900 p-3 flex gap-3"
                   >
-                    {r.thumbUrl && (
+                    {r.thumbUrl ? (
                       <Link href={`/reviews/${r.id}`} className="flex-shrink-0">
                         {/* eslint-disable-next-line @next/next/no-img-element */}
                         <img
@@ -250,8 +348,18 @@ export default async function RestaurantsPage({
                           className="w-20 h-20 rounded-md object-contain bg-table-950"
                         />
                       </Link>
+                    ) : (
+                      <Link
+                        href={`/reviews/${r.id}`}
+                        className="w-20 h-20 rounded-md bg-table-950 flex items-center justify-center flex-shrink-0"
+                      >
+                        <i
+                          className="ti ti-tools-kitchen-2"
+                          style={{ fontSize: 24, color: "#524b3d" }}
+                        />
+                      </Link>
                     )}
-                    <div className="flex-1 min-w-0">
+                    <div className="flex-1 min-w-0 flex flex-col">
                     <div className="flex items-start justify-between gap-2 mb-1">
                       <div>
                         {r.author_id !== user.id && (
@@ -296,7 +404,7 @@ export default async function RestaurantsPage({
                       </div>
                     )}
                     {r.author_id !== user.id && (
-                      <div className="mt-2">
+                      <div className="mt-auto pt-2">
                         <ReviewFavoriteButton
                           reviewId={r.id}
                           initialFavorited={myFavoritedReviewIds.has(r.id)}

@@ -1,13 +1,11 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
-import DeleteRecipeButton from "../DeleteRecipeButton";
-import FavoriteButton from "./FavoriteButton";
-import ListMembership from "./ListMembership";
+import DeleteReviewButton from "./DeleteReviewButton";
+import ReviewListMembership from "./ReviewListMembership";
+import ReviewFavoriteButton from "@/app/restaurants/ReviewFavoriteButton";
 
-type Ingredient = { name: string; amount: string; unit: string };
-
-export default async function RecipeDetailPage({
+export default async function ReviewDetailPage({
   params,
 }: {
   params: { id: string };
@@ -19,120 +17,126 @@ export default async function RecipeDetailPage({
   } = await supabase.auth.getUser();
 
   // RLS already guarantees this only returns something if it's our own
-  // recipe or an accepted friend's -- no manual friend-check needed here.
-  const { data: recipe } = await supabase
-    .from("recipes")
+  // review or an accepted friend's.
+  const { data: review } = await supabase
+    .from("restaurant_reviews")
     .select(
-      "id, author_id, title, description, ingredients, steps, photo_url, tags, prep_time_minutes, servings, notes, created_at, author:author_id(display_name)"
+      "id, author_id, place_id, restaurant_name, address, latitude, longitude, rating, tags, review_text, notes, photo_urls, created_at, author:author_id(display_name)"
     )
     .eq("id", params.id)
     .single();
 
-  if (!recipe) {
+  if (!review) {
     notFound();
   }
 
-  const isOwner = recipe.author_id === user?.id;
+  const isOwner = review.author_id === user?.id;
 
-  let signedPhotoUrl: string | null = null;
-  if (recipe.photo_url) {
-    const { data } = await supabase.storage
-      .from("recipe-photos")
-      .createSignedUrl(recipe.photo_url, 60 * 60);
-    signedPhotoUrl = data?.signedUrl ?? null;
+  // If this is a friend's review, check whether the viewer already has
+  // their own review of the same physical place -- if so, we'll offer
+  // "edit your review" instead of risking an accidental duplicate.
+  let myOwnReviewId: string | null = null;
+  if (!isOwner) {
+    const { data: mine } = await supabase
+      .from("restaurant_reviews")
+      .select("id")
+      .eq("author_id", user?.id)
+      .eq("place_id", review.place_id)
+      .maybeSingle();
+    myOwnReviewId = mine?.id ?? null;
   }
 
-  // Lists this viewer owns -- used to add this recipe (own or a
-  // friend's) to any number of their own lists.
+  const signedPhotoUrls = await Promise.all(
+    (review.photo_urls ?? []).map(async (path: string) => {
+      const { data } = await supabase.storage
+        .from("review-photos")
+        .createSignedUrl(path, 60 * 60);
+      return data?.signedUrl ?? null;
+    })
+  );
+
+  // Only restaurant-type lists -- a recipe list shouldn't show up here.
   const { data: userLists } = await supabase
     .from("lists")
     .select("id, name")
-    .eq("owner_id", user?.id);
+    .eq("owner_id", user?.id)
+    .eq("type", "restaurant");
 
-  // Which of the viewer's own lists this recipe is currently on.
   const { data: memberships } = await supabase
     .from("list_items")
     .select("list_id")
-    .eq("recipe_id", recipe.id);
+    .eq("review_id", review.id);
   const initialListIds = (memberships ?? []).map((m) => m.list_id);
 
-  // If this is a friend's recipe, check whether we've already favorited it.
   let initialFavorited = false;
   if (!isOwner) {
     const { data: existingFavorite } = await supabase
-      .from("recipe_favorites")
+      .from("review_favorites")
       .select("id")
       .eq("user_id", user?.id)
-      .eq("recipe_id", recipe.id)
+      .eq("review_id", review.id)
       .maybeSingle();
     initialFavorited = !!existingFavorite;
   }
 
-  const ingredients = (recipe.ingredients as Ingredient[]) ?? [];
-  const steps = (recipe.steps as string[]) ?? [];
-
   return (
     <main className="max-w-lg mx-auto px-6 py-12">
-      <Link href="/recipes" className="text-sm text-table-400 hover:text-table-100">
+      <Link href="/restaurants" className="text-sm text-table-400 hover:text-table-100">
         ← Back
       </Link>
 
-      {signedPhotoUrl && (
-        // eslint-disable-next-line @next/next/no-img-element
-        <img
-          src={signedPhotoUrl}
-          alt={recipe.title}
-          className="w-full max-h-96 object-contain bg-table-950 rounded-lg my-4"
-        />
+      {signedPhotoUrls.filter(Boolean).length > 0 && (
+        <div className="flex gap-2 overflow-x-auto my-4">
+          {signedPhotoUrls.filter(Boolean).map((url, i) => (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              key={i}
+              src={url!}
+              alt=""
+              className="h-56 rounded-lg object-cover flex-shrink-0"
+            />
+          ))}
+        </div>
       )}
 
       <div className="flex items-start justify-between gap-3 mt-4 mb-1">
         <div>
           <Link
-            href={`/people/${recipe.author_id}`}
+            href={`/people/${review.author_id}`}
             className="text-xs text-table-500 hover:text-herb-400 mb-1 block"
           >
-            {(recipe.author as any)?.display_name ?? "Someone"}
+            {(review.author as any)?.display_name ?? "Someone"}
           </Link>
-          <h1 className="font-display text-3xl">{recipe.title}</h1>
+          <h1 className="font-display text-3xl">{review.restaurant_name}</h1>
+          {review.address && (
+            <p className="text-xs text-table-500 mt-1">{review.address}</p>
+          )}
         </div>
         {isOwner && (
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-3 flex-shrink-0">
             <Link
-              href={`/recipes/${recipe.id}/edit`}
+              href={`/reviews/${review.id}/edit`}
               className="text-xs text-table-500 hover:text-table-300"
             >
               Edit
             </Link>
-            <DeleteRecipeButton
-              recipeId={recipe.id}
-              photoPath={recipe.photo_url}
-              redirectTo="/recipes"
+            <DeleteReviewButton
+              reviewId={review.id}
+              photoPaths={review.photo_urls ?? []}
+              redirectTo="/restaurants"
             />
           </div>
         )}
       </div>
 
-      {recipe.description && (
-        <p className="text-table-400 text-sm mt-2 mb-4">{recipe.description}</p>
-      )}
+      <p className="text-sm text-table-300 flex items-center gap-1 mt-2 mb-4">
+        <i className="ti ti-star-filled" style={{ fontSize: 14, color: "#e0b04d" }} />
+        {review.rating} / 5
+      </p>
 
-      <div className="flex flex-wrap items-center gap-3 text-sm text-table-400 mb-4">
-        {recipe.prep_time_minutes && (
-          <span>
-            <i className="ti ti-clock" style={{ fontSize: 14 }} /> {recipe.prep_time_minutes} min
-          </span>
-        )}
-        {recipe.servings && (
-          <span>
-            <i className="ti ti-users" style={{ fontSize: 14 }} /> {recipe.servings} servings
-          </span>
-        )}
-      </div>
-
-      {recipe.tags && recipe.tags.length > 0 && (
+      {review.tags && review.tags.length > 0 && (
         <div className="flex flex-wrap gap-2 mb-4">
-          {recipe.tags.map((tag: string) => (
+          {review.tags.map((tag: string) => (
             <span
               key={tag}
               className="text-xs bg-table-800 text-table-300 px-2 py-1 rounded-md"
@@ -145,43 +149,43 @@ export default async function RecipeDetailPage({
 
       <div className="mb-6 space-y-4">
         {!isOwner && (
-          <FavoriteButton recipeId={recipe.id} initialFavorited={initialFavorited} />
+          <div className="flex items-center gap-4">
+            <ReviewFavoriteButton reviewId={review.id} initialFavorited={initialFavorited} />
+            {myOwnReviewId ? (
+              <Link
+                href={`/reviews/${myOwnReviewId}/edit`}
+                className="text-sm text-herb-400 hover:text-herb-300"
+              >
+                Edit your review of this place
+              </Link>
+            ) : (
+              <Link
+                href={`/reviews/new?placeId=${encodeURIComponent(review.place_id)}&name=${encodeURIComponent(review.restaurant_name)}&address=${encodeURIComponent(review.address ?? "")}&lat=${review.latitude}&lng=${review.longitude}`}
+                className="text-sm text-herb-400 hover:text-herb-300"
+              >
+                + Review this place too
+              </Link>
+            )}
+          </div>
         )}
-        <ListMembership
-          recipeId={recipe.id}
+        <ReviewListMembership
+          reviewId={review.id}
           userLists={userLists ?? []}
           initialListIds={initialListIds}
         />
       </div>
 
-      {ingredients.length > 0 && (
+      {review.review_text && (
         <section className="mb-6">
-          <h2 className="font-display text-lg mb-2">Ingredients</h2>
-          <ul className="space-y-1 text-sm text-table-300">
-            {ingredients.map((ing, i) => (
-              <li key={i}>
-                {ing.amount} {ing.unit} {ing.name}
-              </li>
-            ))}
-          </ul>
+          <h2 className="font-display text-lg mb-2">Review</h2>
+          <p className="text-sm text-table-300 whitespace-pre-wrap">{review.review_text}</p>
         </section>
       )}
 
-      {steps.length > 0 && (
-        <section className="mb-6">
-          <h2 className="font-display text-lg mb-2">Steps</h2>
-          <ol className="space-y-2 text-sm text-table-300 list-decimal list-inside">
-            {steps.map((step, i) => (
-              <li key={i}>{step}</li>
-            ))}
-          </ol>
-        </section>
-      )}
-
-      {recipe.notes && (
+      {review.notes && (
         <section>
           <h2 className="font-display text-lg mb-2">Notes</h2>
-          <p className="text-sm text-table-400">{recipe.notes}</p>
+          <p className="text-sm text-table-400 whitespace-pre-wrap">{review.notes}</p>
         </section>
       )}
     </main>

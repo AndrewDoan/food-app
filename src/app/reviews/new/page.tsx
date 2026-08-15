@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import PlaceSearch, { type Place } from "./PlaceSearch";
 import TagInput from "@/components/TagInput";
@@ -12,8 +12,22 @@ type TagSuggestion = { tag: string; count: number };
 export default function NewReviewPage() {
   const router = useRouter();
   const supabase = createClient();
+  const urlParams = useSearchParams();
 
-  const [place, setPlace] = useState<Place | null>(null);
+  // If arriving from a "review this place too" link, pre-fill the place
+  // search instead of making the person re-search a restaurant that's
+  // already been identified.
+  const prefilledPlace: Place | null = urlParams.get("placeId")
+    ? {
+        placeId: urlParams.get("placeId")!,
+        name: urlParams.get("name") ?? "",
+        address: urlParams.get("address") ?? "",
+        lat: parseFloat(urlParams.get("lat") ?? "0"),
+        lng: parseFloat(urlParams.get("lng") ?? "0"),
+      }
+    : null;
+
+  const [place, setPlace] = useState<Place | null>(prefilledPlace);
   const [rating, setRating] = useState(5);
   const [photos, setPhotos] = useState<File[]>([]);
   const [reviewText, setReviewText] = useState("");
@@ -130,7 +144,7 @@ export default function NewReviewPage() {
       <form onSubmit={handleSubmit} className="space-y-6">
         <div>
           <label className="block text-sm text-table-400 mb-1">Find the restaurant</label>
-          <PlaceSearch onSelect={setPlace} />
+          <PlaceSearch onSelect={setPlace} initialPlace={prefilledPlace} />
         </div>
 
         <div>

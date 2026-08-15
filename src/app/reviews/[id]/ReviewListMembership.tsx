@@ -55,7 +55,7 @@ export default function ReviewListMembership({
 
     const { data: newList, error } = await supabase
       .from("lists")
-      .insert({ owner_id: user.id, name: newListName.trim() })
+      .insert({ owner_id: user.id, name: newListName.trim(), type: "restaurant" })
       .select("id")
       .single();
 

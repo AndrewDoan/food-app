@@ -55,7 +55,7 @@ export default function ListMembership({
 
     const { data: newList, error } = await supabase
       .from("lists")
-      .insert({ owner_id: user.id, name: newListName.trim() })
+      .insert({ owner_id: user.id, name: newListName.trim(), type: "recipe" })
       .select("id")
       .single();
 

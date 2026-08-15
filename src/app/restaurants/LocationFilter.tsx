@@ -29,11 +29,16 @@ export default function LocationFilter() {
     navigator.geolocation.getCurrentPosition(
       (pos) => {
         setLocating(false);
-        updateParams({
-          lat: pos.coords.latitude.toString(),
-          lng: pos.coords.longitude.toString(),
-          radius,
-        });
+        const lat = pos.coords.latitude.toString();
+        const lng = pos.coords.longitude.toString();
+        // Remembered locally so the map can default here next time,
+        // even before "Near me" is explicitly clicked again.
+        try {
+          localStorage.setItem("table:lastLocation", JSON.stringify({ lat, lng }));
+        } catch {
+          // Storage can fail (private browsing, etc.) -- harmless to skip.
+        }
+        updateParams({ lat, lng, radius });
       },
       (err) => {
         setLocating(false);

@@ -54,7 +54,8 @@ export default async function FriendPage({
   const { data: personLists } = await supabase
     .from("lists")
     .select("id, name")
-    .eq("owner_id", personId);
+    .eq("owner_id", personId)
+    .eq("type", type === "restaurants" ? "restaurant" : "recipe");
 
   const basePath = `/people/${personId}`;
 
@@ -384,7 +385,7 @@ export default async function FriendPage({
                       key={r.id}
                       className="rounded-lg border border-table-700 bg-table-900 p-3 flex gap-3"
                     >
-                      {r.thumbUrl && (
+                      {r.thumbUrl ? (
                         <Link href={`/reviews/${r.id}`} className="flex-shrink-0">
                           {/* eslint-disable-next-line @next/next/no-img-element */}
                           <img
@@ -393,8 +394,18 @@ export default async function FriendPage({
                             className="w-20 h-20 rounded-md object-contain bg-table-950"
                           />
                         </Link>
+                      ) : (
+                        <Link
+                          href={`/reviews/${r.id}`}
+                          className="w-20 h-20 rounded-md bg-table-950 flex items-center justify-center flex-shrink-0"
+                        >
+                          <i
+                            className="ti ti-tools-kitchen-2"
+                            style={{ fontSize: 24, color: "#524b3d" }}
+                          />
+                        </Link>
                       )}
-                      <div className="flex-1 min-w-0">
+                      <div className="flex-1 min-w-0 flex flex-col">
                         <div className="flex items-start justify-between gap-2">
                           <Link
                             href={`/reviews/${r.id}`}
@@ -416,7 +427,7 @@ export default async function FriendPage({
                           </p>
                         )}
                         {!isSelf && (
-                          <div className="mt-2">
+                          <div className="mt-auto pt-2">
                             <ReviewFavoriteButton
                               reviewId={r.id}
                               initialFavorited={reviewMyFavoritedIds.has(r.id)}

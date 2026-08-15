@@ -13,7 +13,7 @@ export default async function ListsPage() {
 
   const { data: lists } = await supabase
     .from("lists")
-    .select("id, name, created_at")
+    .select("id, name, type, created_at")
     .eq("owner_id", user.id)
     .order("created_at", { ascending: false });
 
@@ -22,22 +22,35 @@ export default async function ListsPage() {
   const { data: items } = listIds.length
     ? await supabase
         .from("list_items")
-        .select("id, list_id, recipe:recipe_id(id, title, prep_time_minutes)")
+        .select(
+          "id, list_id, recipe:recipe_id(id, title, prep_time_minutes), review:review_id(id, restaurant_name, rating)"
+        )
         .in("list_id", listIds)
     : { data: [] };
 
   const itemsByList = new Map<string, any[]>();
-  (items ?? []).forEach((i) => {
-    if (!i.recipe) return; // review items skipped for now -- no review list UI yet
+  (items ?? []).forEach((i: any) => {
     const arr = itemsByList.get(i.list_id) ?? [];
-    arr.push({
-      itemId: i.id,
-      recipeId: (i.recipe as any).id,
-      title: (i.recipe as any).title,
-      prepTimeMinutes: (i.recipe as any).prep_time_minutes,
-    });
+    if (i.recipe) {
+      arr.push({
+        itemId: i.id,
+        recipeId: i.recipe.id,
+        title: i.recipe.title,
+        prepTimeMinutes: i.recipe.prep_time_minutes,
+      });
+    } else if (i.review) {
+      arr.push({
+        itemId: i.id,
+        reviewId: i.review.id,
+        restaurantName: i.review.restaurant_name,
+        rating: i.review.rating,
+      });
+    }
     itemsByList.set(i.list_id, arr);
   });
+
+  const recipeLists = (lists ?? []).filter((l) => l.type === "recipe");
+  const restaurantLists = (lists ?? []).filter((l) => l.type === "restaurant");
 
   return (
     <main className="max-w-lg mx-auto px-6 py-12">
@@ -51,19 +64,48 @@ export default async function ListsPage() {
 
       {(lists ?? []).length === 0 ? (
         <p className="text-table-500 text-sm">
-          No lists yet. Create one above, or add a recipe to a list from its page.
+          No lists yet. Create one above, or add a recipe/review to a list from its page.
         </p>
       ) : (
-        <ul className="space-y-2">
-          {(lists ?? []).map((l) => (
-            <ListAccordionItem
-              key={l.id}
-              listId={l.id}
-              name={l.name}
-              items={itemsByList.get(l.id) ?? []}
-            />
-          ))}
-        </ul>
+        <div className="space-y-8">
+          <div>
+            <p className="text-xs font-medium text-table-400 mb-2">Recipe Lists</p>
+            {recipeLists.length === 0 ? (
+              <p className="text-table-600 text-sm">None yet.</p>
+            ) : (
+              <ul className="space-y-2">
+                {recipeLists.map((l) => (
+                  <ListAccordionItem
+                    key={l.id}
+                    listId={l.id}
+                    name={l.name}
+                    kind="recipe"
+                    items={itemsByList.get(l.id) ?? []}
+                  />
+                ))}
+              </ul>
+            )}
+          </div>
+
+          <div>
+            <p className="text-xs font-medium text-table-400 mb-2">Restaurant Lists</p>
+            {restaurantLists.length === 0 ? (
+              <p className="text-table-600 text-sm">None yet.</p>
+            ) : (
+              <ul className="space-y-2">
+                {restaurantLists.map((l) => (
+                  <ListAccordionItem
+                    key={l.id}
+                    listId={l.id}
+                    name={l.name}
+                    kind="restaurant"
+                    items={itemsByList.get(l.id) ?? []}
+                  />
+                ))}
+              </ul>
+            )}
+          </div>
+        </div>
       )}
     </main>
   );

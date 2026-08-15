@@ -21,7 +21,7 @@ export default async function ReviewDetailPage({
   const { data: review } = await supabase
     .from("restaurant_reviews")
     .select(
-      "id, author_id, restaurant_name, address, rating, tags, review_text, notes, photo_urls, created_at, author:author_id(display_name)"
+      "id, author_id, place_id, restaurant_name, address, latitude, longitude, rating, tags, review_text, notes, photo_urls, created_at, author:author_id(display_name)"
     )
     .eq("id", params.id)
     .single();
@@ -31,6 +31,20 @@ export default async function ReviewDetailPage({
   }
 
   const isOwner = review.author_id === user?.id;
+
+  // If this is a friend's review, check whether the viewer already has
+  // their own review of the same physical place -- if so, we'll offer
+  // "edit your review" instead of risking an accidental duplicate.
+  let myOwnReviewId: string | null = null;
+  if (!isOwner) {
+    const { data: mine } = await supabase
+      .from("restaurant_reviews")
+      .select("id")
+      .eq("author_id", user?.id)
+      .eq("place_id", review.place_id)
+      .maybeSingle();
+    myOwnReviewId = mine?.id ?? null;
+  }
 
   const signedPhotoUrls = await Promise.all(
     (review.photo_urls ?? []).map(async (path: string) => {
@@ -133,7 +147,24 @@ export default async function ReviewDetailPage({
 
       <div className="mb-6 space-y-4">
         {!isOwner && (
-          <ReviewFavoriteButton reviewId={review.id} initialFavorited={initialFavorited} />
+          <div className="flex items-center gap-4">
+            <ReviewFavoriteButton reviewId={review.id} initialFavorited={initialFavorited} />
+            {myOwnReviewId ? (
+              <Link
+                href={`/reviews/${myOwnReviewId}/edit`}
+                className="text-sm text-herb-400 hover:text-herb-300"
+              >
+                Edit your review of this place
+              </Link>
+            ) : (
+              <Link
+                href={`/reviews/new?placeId=${encodeURIComponent(review.place_id)}&name=${encodeURIComponent(review.restaurant_name)}&address=${encodeURIComponent(review.address ?? "")}&lat=${review.latitude}&lng=${review.longitude}`}
+                className="text-sm text-herb-400 hover:text-herb-300"
+              >
+                + Review this place too
+              </Link>
+            )}
+          </div>
         )}
         <ReviewListMembership
           reviewId={review.id}

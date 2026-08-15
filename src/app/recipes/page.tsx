@@ -267,7 +267,7 @@ export default async function RecipesPage({
             >
               {labelFor(f.id, f.display_name)?.[0]?.toUpperCase() ?? "?"}
             </div>
-            <span className="text-xs text-table-500 truncate max-w-[52px]">
+            <span className="text-xs text-table-500 text-center w-16 leading-tight">
               {labelFor(f.id, f.display_name)}
             </span>
           </Link>

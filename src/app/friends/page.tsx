@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
+import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
 
 type Friendship = {
@@ -53,23 +54,24 @@ export default function FriendsPage() {
     e.preventDefault();
     setMessage(null);
 
-    const { data: matchId, error: lookupError } = await supabase.rpc(
-      "find_user_by_invite_code",
-      { code: codeInput.trim() }
-    );
+    const { data: match, error: lookupError } = await supabase
+      .from("users")
+      .select("id")
+      .eq("invite_code", codeInput.trim())
+      .single();
 
-    if (lookupError || !matchId) {
+    if (lookupError || !match) {
       setMessage("No one found with that code.");
       return;
     }
-    if (matchId === userId) {
+    if (match.id === userId) {
       setMessage("That's your own code.");
       return;
     }
 
     const { error: insertError } = await supabase.from("friendships").insert({
       requester_id: userId,
-      addressee_id: matchId,
+      addressee_id: match.id,
     });
 
     if (insertError) {
@@ -165,16 +167,23 @@ export default function FriendsPage() {
           </p>
         ) : (
           <ul className="space-y-2">
-            {accepted.map((f) => (
-              <li
-                key={f.id}
-                className="rounded-md bg-table-900 border border-table-700 px-4 py-3"
-              >
-                {f.requester_id === userId
+            {accepted.map((f) => {
+              const friendId = f.requester_id === userId ? f.addressee_id : f.requester_id;
+              const friendName =
+                f.requester_id === userId
                   ? f.users_addressee?.display_name
-                  : f.users_requester?.display_name}
-              </li>
-            ))}
+                  : f.users_requester?.display_name;
+              return (
+                <li key={f.id}>
+                  <Link
+                    href={`/people/${friendId}`}
+                    className="block rounded-md bg-table-900 border border-table-700 px-4 py-3 hover:border-table-500"
+                  >
+                    {friendName}
+                  </Link>
+                </li>
+              );
+            })}
           </ul>
         )}
       </section>

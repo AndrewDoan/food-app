@@ -5,21 +5,26 @@ import Link from "next/link";
 import RemoveFromListButton from "./[id]/RemoveFromListButton";
 import ListSettings from "./[id]/ListSettings";
 
-type RecipeItem = {
+type Item = {
   itemId: string;
-  recipeId: string;
-  title: string;
-  prepTimeMinutes: number | null;
+  recipeId?: string;
+  title?: string;
+  prepTimeMinutes?: number | null;
+  reviewId?: string;
+  restaurantName?: string;
+  rating?: number;
 };
 
 export default function ListAccordionItem({
   listId,
   name,
+  kind,
   items,
 }: {
   listId: string;
   name: string;
-  items: RecipeItem[];
+  kind: "recipe" | "restaurant";
+  items: Item[];
 }) {
   const [open, setOpen] = useState(false);
 
@@ -44,7 +49,8 @@ export default function ListAccordionItem({
 
           {items.length === 0 ? (
             <p className="text-xs text-table-500">
-              Nothing on this list yet. Add a recipe to it from the recipe's page.
+              Nothing on this list yet. Add {kind === "recipe" ? "a recipe" : "a review"} to
+              it from its page.
             </p>
           ) : (
             <ul className="space-y-1.5">
@@ -53,14 +59,21 @@ export default function ListAccordionItem({
                   key={item.itemId}
                   className="flex items-center justify-between text-sm"
                 >
-                  <Link href={`/recipes/${item.recipeId}`} className="hover:text-herb-400">
-                    {item.title}
-                    {item.prepTimeMinutes && (
-                      <span className="text-xs text-table-500 ml-2">
-                        {item.prepTimeMinutes} min
-                      </span>
-                    )}
-                  </Link>
+                  {kind === "recipe" ? (
+                    <Link href={`/recipes/${item.recipeId}`} className="hover:text-herb-400">
+                      {item.title}
+                      {item.prepTimeMinutes && (
+                        <span className="text-xs text-table-500 ml-2">
+                          {item.prepTimeMinutes} min
+                        </span>
+                      )}
+                    </Link>
+                  ) : (
+                    <Link href={`/reviews/${item.reviewId}`} className="hover:text-herb-400">
+                      {item.restaurantName}
+                      <span className="text-xs text-table-500 ml-2">★ {item.rating}</span>
+                    </Link>
+                  )}
                   <RemoveFromListButton listItemId={item.itemId} />
                 </li>
               ))}
