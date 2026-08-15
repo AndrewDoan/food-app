@@ -55,10 +55,12 @@ export default async function ReviewDetailPage({
     })
   );
 
+  // Only restaurant-type lists -- a recipe list shouldn't show up here.
   const { data: userLists } = await supabase
     .from("lists")
     .select("id, name")
-    .eq("owner_id", user?.id);
+    .eq("owner_id", user?.id)
+    .eq("type", "restaurant");
 
   const { data: memberships } = await supabase
     .from("list_items")

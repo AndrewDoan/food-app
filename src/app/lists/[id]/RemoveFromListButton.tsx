@@ -20,9 +20,11 @@ export default function RemoveFromListButton({ listItemId }: { listItemId: strin
     <button
       onClick={handleRemove}
       disabled={removing}
-      className="text-xs text-table-500 hover:text-red-400 disabled:opacity-50"
+      title="Remove from list"
+      aria-label="Remove from list"
+      className="w-7 h-7 rounded-full flex items-center justify-center flex-shrink-0 text-table-500 hover:text-red-400 hover:bg-table-900 transition-colors disabled:opacity-50"
     >
-      Remove
+      <i className={removing ? "ti ti-loader-2" : "ti ti-x"} style={{ fontSize: 14 }} />
     </button>
   );
 }

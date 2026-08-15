@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 
 type Friendship = {
@@ -14,6 +15,7 @@ type Friendship = {
 };
 
 export default function FriendsPage() {
+  const router = useRouter();
   const supabase = createClient();
   const [userId, setUserId] = useState<string | null>(null);
   const [myCode, setMyCode] = useState<string>("");
@@ -102,6 +104,13 @@ export default function FriendsPage() {
 
   return (
     <main className="max-w-lg mx-auto px-6 py-12">
+      <button
+        type="button"
+        onClick={() => router.back()}
+        className="text-sm text-table-400 hover:text-table-100 mb-4"
+      >
+        ← Back
+      </button>
       <h1 className="font-display text-3xl mb-8">Friends</h1>
 
       <section className="mb-10 rounded-lg border border-table-700 bg-table-900 p-5">

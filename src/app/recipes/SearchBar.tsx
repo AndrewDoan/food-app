@@ -45,13 +45,12 @@ export default function SearchBar({
   }, []);
 
   return (
-    <form onSubmit={handleSubmit} className="flex items-center gap-2 mb-6">
-      <i className="ti ti-search" style={{ fontSize: 18, color: "var(--text-muted, #8a8170)" }} />
+    <form onSubmit={handleSubmit} className="mb-6">
       <input
         value={q}
         onChange={handleChange}
         placeholder={placeholder}
-        className="flex-1 rounded-md bg-table-900 border border-table-700 px-3 py-2 text-sm focus:border-herb-500"
+        className="w-full rounded-md bg-table-900 border border-table-700 px-3 py-2 text-sm focus:border-herb-500"
       />
     </form>
   );

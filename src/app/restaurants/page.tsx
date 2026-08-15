@@ -9,7 +9,7 @@ import { haversineMiles } from "@/lib/distance";
 export default async function RestaurantsPage({
   searchParams,
 }: {
-  searchParams: { q?: string; tag?: string; lat?: string; lng?: string; radius?: string };
+  searchParams: { q?: string; tag?: string; lat?: string; lng?: string; radius?: string; list?: string };
 }) {
   const supabase = createClient();
 
@@ -20,6 +20,7 @@ export default async function RestaurantsPage({
 
   const q = searchParams.q ?? "";
   const activeTag = searchParams.tag ?? "";
+  const activeList = searchParams.list ?? "";
   const myLat = searchParams.lat ? parseFloat(searchParams.lat) : null;
   const myLng = searchParams.lng ? parseFloat(searchParams.lng) : null;
   const radiusMiles = searchParams.radius ? parseFloat(searchParams.radius) : 25;
@@ -37,14 +38,28 @@ export default async function RestaurantsPage({
   );
 
   const { data: friendProfiles } = friendIds.length
-    ? await supabase.from("users").select("id, display_name").in("id", friendIds)
+    ? await supabase.from("users").select("id, display_name, avatar_url").in("id", friendIds)
     : { data: [] };
 
   const { data: ownProfile } = await supabase
     .from("users")
-    .select("display_name")
+    .select("display_name, avatar_url")
     .eq("id", user.id)
     .single();
+
+  const avatarUrlById = new Map<string, string>();
+  const avatarSources = [
+    ...(ownProfile?.avatar_url ? [{ id: user.id, path: ownProfile.avatar_url }] : []),
+    ...(friendProfiles ?? [])
+      .filter((f) => f.avatar_url)
+      .map((f) => ({ id: f.id, path: f.avatar_url as string })),
+  ];
+  await Promise.all(
+    avatarSources.map(async ({ id, path }) => {
+      const { data } = await supabase.storage.from("avatars").createSignedUrl(path, 60 * 60);
+      if (data?.signedUrl) avatarUrlById.set(id, data.signedUrl);
+    })
+  );
 
   const { data: nicknameRows } = friendIds.length
     ? await supabase
@@ -77,6 +92,23 @@ export default async function RestaurantsPage({
 
   // ---- Fetch reviews -------------------------------------------------
   // RLS already guarantees this only returns our own reviews plus
+  // Your own restaurant Lists, shown as a filter row.
+  const { data: myLists } = await supabase
+    .from("lists")
+    .select("id, name")
+    .eq("owner_id", user.id)
+    .eq("type", "restaurant");
+
+  let listFilterReviewIds: string[] | null = null;
+  if (activeList) {
+    const { data: itemsInList } = await supabase
+      .from("list_items")
+      .select("review_id")
+      .eq("list_id", activeList)
+      .not("review_id", "is", null);
+    listFilterReviewIds = (itemsInList ?? []).map((i) => i.review_id as string);
+  }
+
   // accepted friends' -- search/tag just narrow further.
   let query = supabase
     .from("restaurant_reviews")
@@ -86,6 +118,7 @@ export default async function RestaurantsPage({
     .order("created_at", { ascending: false });
 
   if (activeTag) query = query.contains("tags", [activeTag]);
+  if (listFilterReviewIds) query = query.in("id", listFilterReviewIds);
   if (q) {
     const orParts = [
       `restaurant_name.ilike.%${q}%`,
@@ -215,6 +248,7 @@ export default async function RestaurantsPage({
     const params = new URLSearchParams();
     if (q) params.set("q", q);
     if (activeTag) params.set("tag", activeTag);
+    if (activeList) params.set("list", activeList);
     if (hasLocation) {
       params.set("lat", myLat!.toString());
       params.set("lng", myLng!.toString());
@@ -230,13 +264,13 @@ export default async function RestaurantsPage({
 
   return (
     <main className="max-w-2xl mx-auto px-6 py-12">
-      <div className="flex items-center justify-between mb-6">
+      <div className="flex items-center justify-between mb-4">
         <Link href="/">
           <h1 className="font-display text-3xl">Table</h1>
         </Link>
         <div className="flex gap-4 text-sm">
-          <Link href="/recipes" className="text-table-400 hover:text-table-100">
-            Recipes
+          <Link href="/lists" className="text-table-400 hover:text-table-100">
+            Lists
           </Link>
           <Link href="/profile" className="text-table-400 hover:text-table-100">
             Profile
@@ -244,13 +278,33 @@ export default async function RestaurantsPage({
           <Link href="/friends" className="text-table-400 hover:text-table-100">
             Friends
           </Link>
-          <Link
-            href="/reviews/new"
-            className="text-herb-400 hover:text-herb-300 font-medium"
-          >
-            + New review
-          </Link>
         </div>
+      </div>
+
+      {/* Section switcher -- matches the one on /recipes so it's always
+          obvious which side you're on and how to switch. */}
+      <div className="flex gap-2 mb-6">
+        <Link
+          href="/recipes"
+          className="flex-1 flex items-center justify-center gap-2 py-3 rounded-lg border-2 border-table-700 text-table-400 font-medium hover:border-table-500 hover:text-table-200 transition-colors"
+        >
+          <i className="ti ti-tools-kitchen-2" style={{ fontSize: 18 }} />
+          Recipes
+        </Link>
+        <div className="flex-1 flex items-center justify-center gap-2 py-3 rounded-lg border-2 border-herb-600 bg-herb-600 text-table-50 font-medium">
+          <i className="ti ti-map-pin" style={{ fontSize: 18 }} />
+          Restaurants
+        </div>
+      </div>
+
+      <div className="flex justify-end mb-6">
+        <Link
+          href="/reviews/new"
+          className="text-sm text-herb-400 hover:text-herb-300 font-medium flex items-center gap-1"
+        >
+          <i className="ti ti-plus" style={{ fontSize: 14 }} />
+          New review
+        </Link>
       </div>
 
       <SearchBar basePath="/restaurants" placeholder="Search restaurants by name or tag…" />
@@ -264,13 +318,24 @@ export default async function RestaurantsPage({
             href={`/people/${user.id}?type=restaurants`}
             className="flex flex-col items-center gap-1.5 flex-shrink-0"
           >
-            <div
-              className={`w-11 h-11 rounded-full flex items-center justify-center text-sm font-medium bg-table-800 text-table-400 ${
-                nameMatchIds.has(user.id) ? "ring-2 ring-herb-400" : ""
-              }`}
-            >
-              Me
-            </div>
+            {avatarUrlById.has(user.id) ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={avatarUrlById.get(user.id)}
+                alt="Me"
+                className={`w-11 h-11 rounded-full object-cover ${
+                  nameMatchIds.has(user.id) ? "ring-2 ring-herb-400" : ""
+                }`}
+              />
+            ) : (
+              <div
+                className={`w-11 h-11 rounded-full flex items-center justify-center text-sm font-medium bg-table-800 text-table-400 ${
+                  nameMatchIds.has(user.id) ? "ring-2 ring-herb-400" : ""
+                }`}
+              >
+                Me
+              </div>
+            )}
             <span className="text-xs text-table-500">You</span>
           </Link>
         )}
@@ -282,19 +347,61 @@ export default async function RestaurantsPage({
               href={`/people/${f.id}?type=restaurants`}
               className="flex flex-col items-center gap-1.5 flex-shrink-0"
             >
-              <div
-                className={`w-11 h-11 rounded-full flex items-center justify-center text-sm font-medium bg-table-800 text-table-400 ${
-                  nameMatchIds.has(f.id) ? "ring-2 ring-herb-400" : ""
-                }`}
-              >
-                {labelFor(f.id, f.display_name)?.[0]?.toUpperCase() ?? "?"}
-              </div>
-              <span className="text-xs text-table-500 text-center w-16 leading-tight">
+              {avatarUrlById.has(f.id) ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={avatarUrlById.get(f.id)}
+                  alt={labelFor(f.id, f.display_name)}
+                  className={`w-11 h-11 rounded-full object-cover ${
+                    nameMatchIds.has(f.id) ? "ring-2 ring-herb-400" : ""
+                  }`}
+                />
+              ) : (
+                <div
+                  className={`w-11 h-11 rounded-full flex items-center justify-center text-sm font-medium bg-table-800 text-table-400 ${
+                    nameMatchIds.has(f.id) ? "ring-2 ring-herb-400" : ""
+                  }`}
+                >
+                  {labelFor(f.id, f.display_name)?.[0]?.toUpperCase() ?? "?"}
+                </div>
+              )}
+              <span className="text-xs text-table-500 text-center max-w-[64px] leading-tight">
                 {labelFor(f.id, f.display_name)}
               </span>
             </Link>
           ))}
       </div>
+
+      {(myLists ?? []).length > 0 && (
+        <div className="flex items-center gap-2 mb-4 border-b border-table-700 pb-3 flex-wrap">
+          <Link
+            href={buildHref({ list: null })}
+            className={`text-xs px-2.5 py-1 rounded-md ${
+              !activeList ? "font-medium text-table-100" : "text-table-500"
+            }`}
+          >
+            All
+          </Link>
+          {(myLists ?? []).map((l) => (
+            <Link
+              key={l.id}
+              href={buildHref({ list: l.id })}
+              className={`text-xs px-2.5 py-1 rounded-md ${
+                activeList === l.id ? "text-herb-400 bg-table-800" : "text-table-500"
+              }`}
+            >
+              {l.name}
+            </Link>
+          ))}
+          <Link
+            href="/lists"
+            className="text-xs text-table-600 hover:text-table-400 ml-auto flex items-center gap-1"
+          >
+            <i className="ti ti-settings" style={{ fontSize: 12 }} />
+            Manage
+          </Link>
+        </div>
+      )}
 
       <LocationFilter />
 

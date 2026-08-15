@@ -23,9 +23,10 @@ export default function ListMembership({
   const [newListName, setNewListName] = useState("");
   const [saving, setSaving] = useState(false);
 
-  async function toggleList(listId: string, checked: boolean) {
+  async function toggleList(listId: string) {
+    const currentlyIn = memberOf.has(listId);
     setSaving(true);
-    if (checked) {
+    if (!currentlyIn) {
       await supabase.from("list_items").insert({ list_id: listId, recipe_id: recipeId });
       setMemberOf((prev) => new Set(prev).add(listId));
     } else {
@@ -81,48 +82,67 @@ export default function ListMembership({
         <i className="ti ti-list" style={{ fontSize: 14 }} />
         Lists
       </p>
-      <div className="space-y-1.5">
-        {userLists.map((list) => (
-          <label key={list.id} className="flex items-center gap-2 cursor-pointer">
-            <input
-              type="checkbox"
-              checked={memberOf.has(list.id)}
+      <div className="flex flex-wrap gap-2">
+        {userLists.map((list) => {
+          const active = memberOf.has(list.id);
+          return (
+            <button
+              key={list.id}
+              type="button"
+              onClick={() => toggleList(list.id)}
               disabled={saving}
-              onChange={(e) => toggleList(list.id, e.target.checked)}
-            />
-            <span>{list.name}</span>
-          </label>
-        ))}
-      </div>
+              className={`flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-full border transition-all duration-150 active:scale-95 disabled:opacity-50 ${
+                active
+                  ? "bg-herb-600 border-herb-600 text-table-50"
+                  : "bg-table-900 border-table-700 text-table-400 hover:border-table-500"
+              }`}
+            >
+              {active && <i className="ti ti-check" style={{ fontSize: 12 }} />}
+              {list.name}
+            </button>
+          );
+        })}
 
-      {creatingNew ? (
-        <div className="flex gap-2 mt-2">
-          <input
-            autoFocus
-            placeholder="New list name"
-            value={newListName}
-            onChange={(e) => setNewListName(e.target.value)}
-            className="flex-1 rounded-md bg-table-800 border border-table-700 px-2 py-1 text-sm"
-          />
+        {creatingNew ? (
+          <div className="flex items-center gap-1.5">
+            <input
+              autoFocus
+              placeholder="New list name"
+              value={newListName}
+              onChange={(e) => setNewListName(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") handleCreateNewList();
+                if (e.key === "Escape") setCreatingNew(false);
+              }}
+              className="rounded-full bg-table-800 border border-table-700 px-3 py-1.5 text-xs"
+            />
+            <button
+              type="button"
+              onClick={handleCreateNewList}
+              disabled={!newListName.trim() || saving}
+              className="text-xs text-herb-400 hover:text-herb-300"
+            >
+              Save
+            </button>
+            <button
+              type="button"
+              onClick={() => setCreatingNew(false)}
+              className="text-xs text-table-500"
+            >
+              ✕
+            </button>
+          </div>
+        ) : (
           <button
-            onClick={handleCreateNewList}
-            disabled={!newListName.trim() || saving}
-            className="text-herb-400 hover:text-herb-300 disabled:opacity-50"
+            type="button"
+            onClick={() => setCreatingNew(true)}
+            className="flex items-center gap-1 text-xs px-3 py-1.5 rounded-full border border-dashed border-table-600 text-table-500 hover:border-table-400 hover:text-table-300 transition-colors"
           >
-            Save
+            <i className="ti ti-plus" style={{ fontSize: 12 }} />
+            New list
           </button>
-          <button onClick={() => setCreatingNew(false)} className="text-table-500">
-            Cancel
-          </button>
-        </div>
-      ) : (
-        <button
-          onClick={() => setCreatingNew(true)}
-          className="text-xs text-herb-400 hover:text-herb-300 mt-2"
-        >
-          + New list
-        </button>
-      )}
+        )}
+      </div>
     </div>
   );
 }

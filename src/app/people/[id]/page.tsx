@@ -29,11 +29,19 @@ export default async function FriendPage({
   // page 404s, which doubles as "you can't view a stranger's page."
   const { data: person } = await supabase
     .from("users")
-    .select("id, display_name")
+    .select("id, display_name, avatar_url")
     .eq("id", personId)
     .single();
 
   if (!person) notFound();
+
+  let personAvatarUrl: string | null = null;
+  if (person.avatar_url) {
+    const { data } = await supabase.storage
+      .from("avatars")
+      .createSignedUrl(person.avatar_url, 60 * 60);
+    personAvatarUrl = data?.signedUrl ?? null;
+  }
 
   let nickname: string | null = null;
   if (!isSelf) {
@@ -230,9 +238,18 @@ export default async function FriendPage({
       </Link>
 
       <div className="flex items-center gap-3 mt-4 mb-2">
-        <div className="w-14 h-14 rounded-full bg-herb-600 flex items-center justify-center text-xl font-medium text-table-50">
-          {displayLabel?.[0]?.toUpperCase() ?? "?"}
-        </div>
+        {personAvatarUrl ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={personAvatarUrl}
+            alt={displayLabel ?? ""}
+            className="w-14 h-14 rounded-full object-cover"
+          />
+        ) : (
+          <div className="w-14 h-14 rounded-full bg-herb-600 flex items-center justify-center text-xl font-medium text-table-50">
+            {displayLabel?.[0]?.toUpperCase() ?? "?"}
+          </div>
+        )}
         <div>
           <h1 className="font-display text-2xl">{isSelf ? "You" : displayLabel}</h1>
           {!isSelf && nickname && (

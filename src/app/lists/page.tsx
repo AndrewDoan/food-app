@@ -23,31 +23,65 @@ export default async function ListsPage() {
     ? await supabase
         .from("list_items")
         .select(
-          "id, list_id, recipe:recipe_id(id, title, prep_time_minutes), review:review_id(id, restaurant_name, rating)"
+          "id, list_id, recipe:recipe_id(id, title, prep_time_minutes, photo_url, author_id, author:author_id(display_name)), review:review_id(id, restaurant_name, rating, photo_urls, author_id, author:author_id(display_name))"
         )
         .in("list_id", listIds)
     : { data: [] };
 
+  // My private nicknames for whoever's friends' items appear on my
+  // lists (via favorites) -- same as everywhere else in the app.
+  const { data: nicknameRows } = await supabase
+    .from("friend_nicknames")
+    .select("friend_id, nickname")
+    .eq("user_id", user.id);
+  const nicknameByFriendId = new Map((nicknameRows ?? []).map((n) => [n.friend_id, n.nickname]));
+  function authorLabel(authorId: string, realName: string | null) {
+    if (authorId === user.id) return "You";
+    return nicknameByFriendId.get(authorId) ?? realName ?? "Someone";
+  }
+
   const itemsByList = new Map<string, any[]>();
-  (items ?? []).forEach((i: any) => {
-    const arr = itemsByList.get(i.list_id) ?? [];
-    if (i.recipe) {
-      arr.push({
-        itemId: i.id,
-        recipeId: i.recipe.id,
-        title: i.recipe.title,
-        prepTimeMinutes: i.recipe.prep_time_minutes,
-      });
-    } else if (i.review) {
-      arr.push({
-        itemId: i.id,
-        reviewId: i.review.id,
-        restaurantName: i.review.restaurant_name,
-        rating: i.review.rating,
-      });
-    }
-    itemsByList.set(i.list_id, arr);
-  });
+  await Promise.all(
+    (items ?? []).map(async (i: any) => {
+      const arr = itemsByList.get(i.list_id) ?? [];
+      itemsByList.set(i.list_id, arr);
+
+      if (i.recipe) {
+        let thumbUrl: string | null = null;
+        if (i.recipe.photo_url) {
+          const { data } = await supabase.storage
+            .from("recipe-photos")
+            .createSignedUrl(i.recipe.photo_url, 60 * 60);
+          thumbUrl = data?.signedUrl ?? null;
+        }
+        arr.push({
+          itemId: i.id,
+          recipeId: i.recipe.id,
+          title: i.recipe.title,
+          prepTimeMinutes: i.recipe.prep_time_minutes,
+          thumbUrl,
+          author: authorLabel(i.recipe.author_id, i.recipe.author?.display_name ?? null),
+        });
+      } else if (i.review) {
+        const primaryPath = i.review.photo_urls?.[0];
+        let thumbUrl: string | null = null;
+        if (primaryPath) {
+          const { data } = await supabase.storage
+            .from("review-photos")
+            .createSignedUrl(primaryPath, 60 * 60);
+          thumbUrl = data?.signedUrl ?? null;
+        }
+        arr.push({
+          itemId: i.id,
+          reviewId: i.review.id,
+          restaurantName: i.review.restaurant_name,
+          rating: i.review.rating,
+          thumbUrl,
+          author: authorLabel(i.review.author_id, i.review.author?.display_name ?? null),
+        });
+      }
+    })
+  );
 
   const recipeLists = (lists ?? []).filter((l) => l.type === "recipe");
   const restaurantLists = (lists ?? []).filter((l) => l.type === "restaurant");

@@ -44,13 +44,18 @@ export default function ReviewFavoriteButton({
     <button
       onClick={handleClick}
       disabled={saving}
-      className="flex items-center gap-1.5 text-sm disabled:opacity-50"
+      aria-label={favorited ? "Remove from favorites" : "Add to favorites"}
+      title={favorited ? "Remove from favorites" : "Add to favorites"}
+      className={`w-9 h-9 rounded-full flex items-center justify-center border transition-all duration-150 active:scale-90 disabled:opacity-50 ${
+        favorited
+          ? "bg-[#d4537e]/10 border-[#d4537e]"
+          : "bg-table-900 border-table-700 hover:border-table-500"
+      }`}
     >
       <i
         className={favorited ? "ti ti-heart-filled" : "ti ti-heart"}
-        style={{ color: favorited ? "#d4537e" : undefined }}
+        style={{ fontSize: 16, color: favorited ? "#d4537e" : "#8a8170" }}
       />
-      {favorited ? "Favorited" : "Favorite"}
     </button>
   );
 }

@@ -31,6 +31,7 @@ export default function ListSettings({
       return;
     await supabase.from("lists").delete().eq("id", listId);
     router.push("/lists");
+    router.refresh();
   }
 
   if (editing) {
