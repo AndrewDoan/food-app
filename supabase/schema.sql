@@ -181,7 +181,7 @@ create table if not exists public.recipes (
   description text,
   ingredients jsonb not null default '[]', -- [{ "name": "...", "amount": "...", "unit": "..." }]
   steps jsonb not null default '[]',       -- ["Step one...", "Step two..."]
-  photo_url text,
+  photo_urls text[] not null default '{}', -- capped at 5, see constraint below
   tags text[] not null default '{}',       -- e.g. {"weeknight", "vegetarian", "dessert"} -- for browse/search, not a feed
   prep_time_minutes integer,
   servings integer,
@@ -190,6 +190,10 @@ create table if not exists public.recipes (
 );
 
 create index if not exists idx_recipes_author on public.recipes(author_id);
+
+alter table public.recipes
+  add constraint recipe_photo_urls_max_five
+  check (array_length(photo_urls, 1) is null or array_length(photo_urls, 1) <= 5);
 
 alter table public.recipes enable row level security;
 grant select, insert, update, delete on public.recipes to authenticated;

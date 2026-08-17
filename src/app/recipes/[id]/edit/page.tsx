@@ -5,8 +5,13 @@ import { useRouter, useParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import TagInput from "@/components/TagInput";
 
+const MAX_PHOTOS = 5;
+
 type Ingredient = { name: string; amount: string; unit: string };
 type TagSuggestion = { tag: string; count: number };
+type PhotoItem =
+  | { type: "existing"; path: string; url: string }
+  | { type: "new"; file: File };
 
 export default function EditRecipePage() {
   const router = useRouter();
@@ -17,9 +22,8 @@ export default function EditRecipePage() {
   const [loading, setLoading] = useState(true);
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
-  const [existingPhotoPath, setExistingPhotoPath] = useState<string | null>(null);
-  const [existingPhotoUrl, setExistingPhotoUrl] = useState<string | null>(null);
-  const [newPhotoFile, setNewPhotoFile] = useState<File | null>(null);
+  const [photoItems, setPhotoItems] = useState<PhotoItem[]>([]);
+  const [originalPaths, setOriginalPaths] = useState<string[]>([]);
   const [ingredients, setIngredients] = useState<Ingredient[]>([
     { name: "", amount: "", unit: "" },
   ]);
@@ -46,7 +50,6 @@ export default function EditRecipePage() {
         .single();
 
       if (!recipe || recipe.author_id !== user.id) {
-        // Not found, or not yours -- send back to the recipe's own page.
         router.push(`/recipes/${recipeId}`);
         return;
       }
@@ -61,15 +64,18 @@ export default function EditRecipePage() {
       setPrepTime(recipe.prep_time_minutes?.toString() ?? "");
       setServings(recipe.servings?.toString() ?? "");
       setNotes(recipe.notes ?? "");
-      setExistingPhotoPath(recipe.photo_url);
 
-      if (recipe.photo_url) {
-        const { data } = await supabase.storage
-          .from("recipe-photos")
-          .createSignedUrl(recipe.photo_url, 60 * 60);
-        setExistingPhotoUrl(data?.signedUrl ?? null);
-      }
-
+      const paths: string[] = recipe.photo_urls ?? [];
+      setOriginalPaths(paths);
+      const items: PhotoItem[] = await Promise.all(
+        paths.map(async (path) => {
+          const { data } = await supabase.storage
+            .from("recipe-photos")
+            .createSignedUrl(path, 60 * 60);
+          return { type: "existing" as const, path, url: data?.signedUrl ?? "" };
+        })
+      );
+      setPhotoItems(items);
       setLoading(false);
     }
     load();
@@ -88,6 +94,30 @@ export default function EditRecipePage() {
     }
     loadTagSuggestions();
   }, [recipeId, supabase, router]);
+
+  function handleAddPhotos(e: React.ChangeEvent<HTMLInputElement>) {
+    const files = Array.from(e.target.files ?? []);
+    const room = MAX_PHOTOS - photoItems.length;
+    const toAdd = files.slice(0, Math.max(room, 0)).map((file) => ({
+      type: "new" as const,
+      file,
+    }));
+    setPhotoItems((prev) => [...prev, ...toAdd]);
+    e.target.value = "";
+  }
+
+  function removePhotoItem(index: number) {
+    setPhotoItems((prev) => prev.filter((_, i) => i !== index));
+  }
+
+  function makePrimary(index: number) {
+    setPhotoItems((prev) => {
+      const next = [...prev];
+      const [item] = next.splice(index, 1);
+      next.unshift(item);
+      return next;
+    });
+  }
 
   function updateIngredient(i: number, field: keyof Ingredient, value: string) {
     setIngredients((prev) =>
@@ -113,23 +143,28 @@ export default function EditRecipePage() {
       return;
     }
 
-    let photoPath = existingPhotoPath;
-    if (newPhotoFile) {
-      const ext = newPhotoFile.name.split(".").pop();
-      const path = `${user.id}/${crypto.randomUUID()}.${ext}`;
-      const { error: uploadError } = await supabase.storage
-        .from("recipe-photos")
-        .upload(path, newPhotoFile);
-      if (uploadError) {
-        setError(`Photo upload failed: ${uploadError.message}`);
-        setSaving(false);
-        return;
+    const finalPhotoPaths: string[] = [];
+    for (const item of photoItems) {
+      if (item.type === "existing") {
+        finalPhotoPaths.push(item.path);
+      } else {
+        const ext = item.file.name.split(".").pop();
+        const path = `${user.id}/${crypto.randomUUID()}.${ext}`;
+        const { error: uploadError } = await supabase.storage
+          .from("recipe-photos")
+          .upload(path, item.file);
+        if (uploadError) {
+          setError(`Photo upload failed: ${uploadError.message}`);
+          setSaving(false);
+          return;
+        }
+        finalPhotoPaths.push(path);
       }
-      // Clean up the old photo now that the new one is safely uploaded.
-      if (existingPhotoPath) {
-        await supabase.storage.from("recipe-photos").remove([existingPhotoPath]);
-      }
-      photoPath = path;
+    }
+
+    const removedPaths = originalPaths.filter((p) => !finalPhotoPaths.includes(p));
+    if (removedPaths.length > 0) {
+      await supabase.storage.from("recipe-photos").remove(removedPaths);
     }
 
     const { error: updateError } = await supabase
@@ -143,7 +178,7 @@ export default function EditRecipePage() {
         prep_time_minutes: prepTime ? parseInt(prepTime, 10) : null,
         servings: servings ? parseInt(servings, 10) : null,
         notes: notes || null,
-        photo_url: photoPath,
+        photo_urls: finalPhotoPaths,
       })
       .eq("id", recipeId);
 
@@ -196,21 +231,54 @@ export default function EditRecipePage() {
         </div>
 
         <div>
-          <label className="block text-sm text-table-400 mb-1">Photo</label>
-          {(newPhotoFile || existingPhotoUrl) && (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img
-              src={newPhotoFile ? URL.createObjectURL(newPhotoFile) : existingPhotoUrl!}
-              alt=""
-              className="w-full max-h-64 object-contain bg-table-950 rounded-lg mb-2"
-            />
-          )}
-          <input
-            type="file"
-            accept="image/*"
-            onChange={(e) => setNewPhotoFile(e.target.files?.[0] ?? null)}
-            className="w-full text-sm text-table-400 file:mr-3 file:rounded-md file:border-0 file:bg-table-800 file:px-3 file:py-1.5 file:text-table-100 file:text-sm"
-          />
+          <label className="block text-sm text-table-400 mb-2">
+            Photos ({photoItems.length} of {MAX_PHOTOS}) — tap the star to set the main photo
+          </label>
+          <div className="flex gap-2 flex-wrap">
+            {photoItems.map((item, i) => (
+              <div key={i} className="relative w-16 h-16">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={item.type === "existing" ? item.url : URL.createObjectURL(item.file)}
+                  alt=""
+                  className="w-16 h-16 object-cover rounded-md"
+                />
+                {i === 0 ? (
+                  <span className="absolute -bottom-1.5 -left-1.5 text-[9px] bg-herb-600 text-table-50 px-1 rounded">
+                    Main
+                  </span>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => makePrimary(i)}
+                    title="Make main photo"
+                    className="absolute -bottom-1.5 -left-1.5 w-4 h-4 rounded-full bg-table-800 text-[9px] flex items-center justify-center"
+                  >
+                    <i className="ti ti-star" style={{ fontSize: 9 }} />
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => removePhotoItem(i)}
+                  className="absolute -top-1.5 -right-1.5 w-4 h-4 rounded-full bg-table-800 text-[10px] flex items-center justify-center"
+                >
+                  ✕
+                </button>
+              </div>
+            ))}
+            {photoItems.length < MAX_PHOTOS && (
+              <label className="w-16 h-16 rounded-md border border-dashed border-table-600 flex items-center justify-center cursor-pointer text-table-500 text-lg">
+                +
+                <input
+                  type="file"
+                  accept="image/*"
+                  multiple
+                  onChange={handleAddPhotos}
+                  className="hidden"
+                />
+              </label>
+            )}
+          </div>
         </div>
 
         <div className="flex gap-4">

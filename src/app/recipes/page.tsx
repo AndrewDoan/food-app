@@ -102,7 +102,7 @@ export default async function RecipesPage({
   let query = supabase
     .from("recipes")
     .select(
-      "id, author_id, title, tags, prep_time_minutes, servings, photo_url, author:author_id(display_name)"
+      "id, author_id, title, tags, prep_time_minutes, servings, photo_urls, author:author_id(display_name)"
     )
     .order("created_at", { ascending: false });
 
@@ -150,10 +150,10 @@ export default async function RecipesPage({
   const { data: recipes } = await query;
   const allRecipes = await Promise.all(
     (recipes ?? []).map(async (r: any) => {
-      if (!r.photo_url) return { ...r, thumbUrl: null };
+      if (!r.photo_urls?.length) return { ...r, thumbUrl: null };
       const { data } = await supabase.storage
         .from("recipe-photos")
-        .createSignedUrl(r.photo_url, 60 * 60);
+        .createSignedUrl(r.photo_urls[0], 60 * 60);
       return { ...r, thumbUrl: data?.signedUrl ?? null };
     })
   );

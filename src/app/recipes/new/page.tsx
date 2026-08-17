@@ -5,6 +5,8 @@ import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import TagInput from "@/components/TagInput";
 
+const MAX_PHOTOS = 5;
+
 type Ingredient = { name: string; amount: string; unit: string };
 type TagSuggestion = { tag: string; count: number };
 
@@ -14,7 +16,7 @@ export default function NewRecipePage() {
 
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
-  const [photoFile, setPhotoFile] = useState<File | null>(null);
+  const [photos, setPhotos] = useState<File[]>([]);
   const [ingredients, setIngredients] = useState<Ingredient[]>([
     { name: "", amount: "", unit: "" },
   ]);
@@ -29,8 +31,6 @@ export default function NewRecipePage() {
 
   useEffect(() => {
     async function loadTagSuggestions() {
-      // RLS already scopes this to recipes we can see (own + friends'),
-      // so the suggestion list is automatically our circle's vocabulary.
       const { data } = await supabase.from("recipes").select("tags");
       const counts = new Map<string, number>();
       (data ?? []).forEach((row) =>
@@ -44,6 +44,25 @@ export default function NewRecipePage() {
     }
     loadTagSuggestions();
   }, [supabase]);
+
+  function handleAddPhotos(e: React.ChangeEvent<HTMLInputElement>) {
+    const files = Array.from(e.target.files ?? []);
+    setPhotos((prev) => [...prev, ...files].slice(0, MAX_PHOTOS));
+    e.target.value = "";
+  }
+
+  function removePhoto(index: number) {
+    setPhotos((prev) => prev.filter((_, i) => i !== index));
+  }
+
+  function makePrimary(index: number) {
+    setPhotos((prev) => {
+      const next = [...prev];
+      const [item] = next.splice(index, 1);
+      next.unshift(item);
+      return next;
+    });
+  }
 
   function updateIngredient(i: number, field: keyof Ingredient, value: string) {
     setIngredients((prev) =>
@@ -69,20 +88,20 @@ export default function NewRecipePage() {
       return;
     }
 
-    let photoPath: string | null = null;
-    if (photoFile) {
-      const ext = photoFile.name.split(".").pop();
+    const photoPaths: string[] = [];
+    for (const file of photos) {
+      const ext = file.name.split(".").pop();
       const path = `${user.id}/${crypto.randomUUID()}.${ext}`;
       const { error: uploadError } = await supabase.storage
         .from("recipe-photos")
-        .upload(path, photoFile);
+        .upload(path, file);
 
       if (uploadError) {
         setError(`Photo upload failed: ${uploadError.message}`);
         setSaving(false);
         return;
       }
-      photoPath = path;
+      photoPaths.push(path);
     }
 
     const { error: insertError } = await supabase.from("recipes").insert({
@@ -91,7 +110,7 @@ export default function NewRecipePage() {
       description,
       ingredients: ingredients.filter((i) => i.name.trim()),
       steps: steps.filter((s) => s.trim()),
-      photo_url: photoPath,
+      photo_urls: photoPaths,
       tags,
       prep_time_minutes: prepTime ? parseInt(prepTime, 10) : null,
       servings: servings ? parseInt(servings, 10) : null,
@@ -141,15 +160,54 @@ export default function NewRecipePage() {
         </div>
 
         <div>
-          <label className="block text-sm text-table-400 mb-1">
-            Photo (optional)
+          <label className="block text-sm text-table-400 mb-2">
+            Photos ({photos.length} of {MAX_PHOTOS}) — tap the star to set the main photo
           </label>
-          <input
-            type="file"
-            accept="image/*"
-            onChange={(e) => setPhotoFile(e.target.files?.[0] ?? null)}
-            className="w-full text-sm text-table-400 file:mr-3 file:rounded-md file:border-0 file:bg-table-800 file:px-3 file:py-1.5 file:text-table-100 file:text-sm"
-          />
+          <div className="flex gap-2 flex-wrap">
+            {photos.map((file, i) => (
+              <div key={i} className="relative w-16 h-16">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={URL.createObjectURL(file)}
+                  alt=""
+                  className="w-16 h-16 object-cover rounded-md"
+                />
+                {i === 0 ? (
+                  <span className="absolute -bottom-1.5 -left-1.5 text-[9px] bg-herb-600 text-table-50 px-1 rounded">
+                    Main
+                  </span>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => makePrimary(i)}
+                    title="Make main photo"
+                    className="absolute -bottom-1.5 -left-1.5 w-4 h-4 rounded-full bg-table-800 text-[9px] flex items-center justify-center"
+                  >
+                    <i className="ti ti-star" style={{ fontSize: 9 }} />
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => removePhoto(i)}
+                  className="absolute -top-1.5 -right-1.5 w-4 h-4 rounded-full bg-table-800 text-[10px] flex items-center justify-center"
+                >
+                  ✕
+                </button>
+              </div>
+            ))}
+            {photos.length < MAX_PHOTOS && (
+              <label className="w-16 h-16 rounded-md border border-dashed border-table-600 flex items-center justify-center cursor-pointer text-table-500 text-lg">
+                +
+                <input
+                  type="file"
+                  accept="image/*"
+                  multiple
+                  onChange={handleAddPhotos}
+                  className="hidden"
+                />
+              </label>
+            )}
+          </div>
         </div>
 
         <div className="flex gap-4">

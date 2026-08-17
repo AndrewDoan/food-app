@@ -101,7 +101,7 @@ export default async function FriendPage({
 
     let query = supabase
       .from("recipes")
-      .select("id, author_id, title, tags, prep_time_minutes, servings, photo_url")
+      .select("id, author_id, title, tags, prep_time_minutes, servings, photo_urls")
       .eq("author_id", personId)
       .order("created_at", { ascending: false });
 
@@ -112,10 +112,10 @@ export default async function FriendPage({
     const { data: recipes } = await query;
     const allRecipes = await Promise.all(
       (recipes ?? []).map(async (r: any) => {
-        if (!r.photo_url) return { ...r, thumbUrl: null };
+        if (!r.photo_urls?.length) return { ...r, thumbUrl: null };
         const { data } = await supabase.storage
           .from("recipe-photos")
-          .createSignedUrl(r.photo_url, 60 * 60);
+          .createSignedUrl(r.photo_urls[0], 60 * 60);
         return { ...r, thumbUrl: data?.signedUrl ?? null };
       })
     );
@@ -351,45 +351,75 @@ export default async function FriendPage({
       )}
 
       {sections.length === 0 ? (
-        <p className="text-table-500">Nothing here yet.</p>
+        <div className="text-center py-16">
+          <i
+            className={type === "recipes" ? "ti ti-tools-kitchen-2" : "ti ti-map-pin"}
+            style={{ fontSize: 32, color: "#3a352c" }}
+          />
+          <p className="text-table-500 mt-3">Nothing here yet.</p>
+        </div>
       ) : (
-        <div className="space-y-8">
+        <div className="space-y-10">
           {sections.map((section: any) => (
             <div key={section.key}>
-              <p className="text-xs font-medium text-table-400 mb-2">{section.label}</p>
+              <p className="text-xs font-medium text-herb-400 uppercase tracking-wide mb-3 flex items-center gap-1.5">
+                <i className="ti ti-point-filled" style={{ fontSize: 8 }} />
+                {section.label}
+              </p>
 
               {type === "recipes" ? (
-                <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
                   {section.items.map((r: any) => (
                     <div
                       key={r.id}
-                      className="rounded-lg border border-table-700 bg-table-900 card-surface overflow-hidden"
+                      className="rounded-xl border border-table-700 bg-table-900 card-surface overflow-hidden hover:border-herb-500 hover:-translate-y-0.5 transition-all duration-200 flex flex-col"
                     >
-                      {r.thumbUrl && (
-                        <Link href={`/recipes/${r.id}`}>
-                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <Link href={`/recipes/${r.id}`}>
+                        {r.thumbUrl ? (
+                          // eslint-disable-next-line @next/next/no-img-element
                           <img
                             src={r.thumbUrl}
                             alt={r.title}
-                            className="w-full h-24 object-cover"
+                            className="w-full h-36 object-cover"
                           />
-                        </Link>
-                      )}
-                      <div className="p-3">
+                        ) : (
+                          <div className="w-full h-36 bg-table-950 flex items-center justify-center">
+                            <i
+                              className="ti ti-tools-kitchen-2"
+                              style={{ fontSize: 28, color: "#3a352c" }}
+                            />
+                          </div>
+                        )}
+                      </Link>
+                      <div className="p-4 flex-1 flex flex-col">
                         <Link href={`/recipes/${r.id}`} className="hover:text-herb-400">
-                          <p className="text-sm font-medium mb-1">{r.title}</p>
+                          <p className="font-display text-lg leading-tight mb-1.5">{r.title}</p>
                         </Link>
                         {r.prep_time_minutes && (
-                          <p className="text-[11px] text-table-500 mb-1.5">
-                            <i className="ti ti-clock" style={{ fontSize: 11 }} />{" "}
+                          <p className="text-xs text-table-500 mb-2 flex items-center gap-1">
+                            <i className="ti ti-clock" style={{ fontSize: 12 }} />
                             {r.prep_time_minutes} min
                           </p>
                         )}
+                        {r.tags && r.tags.length > 0 && (
+                          <div className="flex flex-wrap gap-1.5 mb-2">
+                            {r.tags.slice(0, 2).map((t: string) => (
+                              <span
+                                key={t}
+                                className="text-[10px] bg-herb-600/15 text-herb-400 px-2 py-0.5 rounded-full font-medium"
+                              >
+                                {t}
+                              </span>
+                            ))}
+                          </div>
+                        )}
                         {!isSelf && (
-                          <FavoriteButton
-                            recipeId={r.id}
-                            initialFavorited={recipeMyFavoritedIds.has(r.id)}
-                          />
+                          <div className="mt-auto pt-1">
+                            <FavoriteButton
+                              recipeId={r.id}
+                              initialFavorited={recipeMyFavoritedIds.has(r.id)}
+                            />
+                          </div>
                         )}
                       </div>
                     </div>
@@ -400,7 +430,7 @@ export default async function FriendPage({
                   {section.items.map((r: any) => (
                     <div
                       key={r.id}
-                      className="rounded-lg border border-table-700 bg-table-900 card-surface p-3 flex gap-3"
+                      className="rounded-xl border border-table-700 bg-table-900 card-surface p-4 flex gap-4 hover:border-herb-500/50 transition-colors duration-200"
                     >
                       {r.thumbUrl ? (
                         <Link href={`/reviews/${r.id}`} className="flex-shrink-0">
@@ -408,17 +438,17 @@ export default async function FriendPage({
                           <img
                             src={r.thumbUrl}
                             alt={r.restaurant_name}
-                            className="w-20 h-20 rounded-md object-contain bg-table-950"
+                            className="w-24 h-24 rounded-lg object-contain bg-table-950"
                           />
                         </Link>
                       ) : (
                         <Link
                           href={`/reviews/${r.id}`}
-                          className="w-20 h-20 rounded-md bg-table-950 flex items-center justify-center flex-shrink-0"
+                          className="w-24 h-24 rounded-lg bg-table-950 flex items-center justify-center flex-shrink-0"
                         >
                           <i
                             className="ti ti-tools-kitchen-2"
-                            style={{ fontSize: 24, color: "#524b3d" }}
+                            style={{ fontSize: 26, color: "#524b3d" }}
                           />
                         </Link>
                       )}
@@ -426,7 +456,7 @@ export default async function FriendPage({
                         <div className="flex items-start justify-between gap-2">
                           <Link
                             href={`/reviews/${r.id}`}
-                            className="text-sm font-medium hover:text-herb-400"
+                            className="font-display text-lg leading-tight hover:text-herb-400"
                           >
                             {r.restaurant_name}
                           </Link>

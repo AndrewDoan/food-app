@@ -61,19 +61,19 @@ export default function FriendsPage() {
       .eq("user_id", user.id);
     setNicknames(new Map((nicknameRows ?? []).map((n) => [n.friend_id, n.nickname])));
 
-    // Signed URLs for every accepted friend's avatar photo, if they have one.
+    // Signed URLs for every friend's avatar photo, if they have one --
+    // pending requests included now, since RLS allows viewing anyone
+    // with any friendship row (see migration_pending_friend_visibility).
     const relsList = (rels ?? []) as Friendship[];
     const avatarPaths = new Map<string, string>();
-    relsList
-      .filter((f) => f.status === "accepted")
-      .forEach((f) => {
-        const isRequester = f.requester_id === user.id;
-        const friendId = isRequester ? f.addressee_id : f.requester_id;
-        const avatarPath = isRequester
-          ? f.users_addressee?.avatar_url
-          : f.users_requester?.avatar_url;
-        if (avatarPath) avatarPaths.set(friendId, avatarPath);
-      });
+    relsList.forEach((f) => {
+      const isRequester = f.requester_id === user.id;
+      const friendId = isRequester ? f.addressee_id : f.requester_id;
+      const avatarPath = isRequester
+        ? f.users_addressee?.avatar_url
+        : f.users_requester?.avatar_url;
+      if (avatarPath) avatarPaths.set(friendId, avatarPath);
+    });
     const urlEntries = await Promise.all(
       [...avatarPaths.entries()].map(async ([friendId, path]) => {
         const { data } = await supabase.storage.from("avatars").createSignedUrl(path, 60 * 60);
@@ -276,28 +276,44 @@ export default function FriendsPage() {
             Requests
           </h2>
           <ul className="space-y-2">
-            {incoming.map((f) => (
-              <li
-                key={f.id}
-                className="flex items-center justify-between rounded-md bg-table-900 border border-table-700 px-4 py-3"
-              >
-                <span>{f.users_requester?.display_name ?? "Someone"}</span>
-                <div className="flex gap-2">
-                  <button
-                    onClick={() => respond(f.id, "accepted")}
-                    className="text-sm text-herb-400 hover:text-herb-300"
-                  >
-                    Accept
-                  </button>
-                  <button
-                    onClick={() => respond(f.id, "declined")}
-                    className="text-sm text-table-600 hover:text-table-400"
-                  >
-                    Decline
-                  </button>
-                </div>
-              </li>
-            ))}
+            {incoming.map((f) => {
+              const requesterName = f.users_requester?.display_name;
+              const requesterAvatar = avatarUrls.get(f.requester_id);
+              return (
+                <li
+                  key={f.id}
+                  className="flex items-center gap-3 rounded-md bg-table-900 border border-table-700 card-surface px-4 py-3"
+                >
+                  {requesterAvatar ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      src={requesterAvatar}
+                      alt=""
+                      className="w-9 h-9 rounded-full object-cover flex-shrink-0"
+                    />
+                  ) : (
+                    <div className="w-9 h-9 rounded-full bg-herb-600 flex items-center justify-center text-xs font-medium text-table-50 flex-shrink-0">
+                      {requesterName?.[0]?.toUpperCase() ?? "?"}
+                    </div>
+                  )}
+                  <span className="flex-1">{requesterName ?? "Someone"}</span>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => respond(f.id, "accepted")}
+                      className="text-sm text-herb-400 hover:text-herb-300"
+                    >
+                      Accept
+                    </button>
+                    <button
+                      onClick={() => respond(f.id, "declined")}
+                      className="text-sm text-table-600 hover:text-table-400"
+                    >
+                      Decline
+                    </button>
+                  </div>
+                </li>
+              );
+            })}
           </ul>
         </section>
       )}
@@ -364,11 +380,33 @@ export default function FriendsPage() {
             Waiting on
           </h2>
           <ul className="space-y-2">
-            {outgoing.map((f) => (
-              <li key={f.id} className="text-table-500 text-sm">
-                {f.users_addressee?.display_name ?? "Someone"} — pending
-              </li>
-            ))}
+            {outgoing.map((f) => {
+              const addresseeName = f.users_addressee?.display_name;
+              const addresseeAvatar = avatarUrls.get(f.addressee_id);
+              return (
+                <li
+                  key={f.id}
+                  className="flex items-center gap-3 rounded-md bg-table-900 border border-table-700 px-4 py-3"
+                >
+                  {addresseeAvatar ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      src={addresseeAvatar}
+                      alt=""
+                      className="w-9 h-9 rounded-full object-cover flex-shrink-0 opacity-70"
+                    />
+                  ) : (
+                    <div className="w-9 h-9 rounded-full bg-table-800 flex items-center justify-center text-xs font-medium text-table-400 flex-shrink-0">
+                      {addresseeName?.[0]?.toUpperCase() ?? "?"}
+                    </div>
+                  )}
+                  <span className="text-table-400 text-sm flex-1">
+                    {addresseeName ?? "Someone"}
+                  </span>
+                  <span className="text-xs text-table-600">Pending</span>
+                </li>
+              );
+            })}
           </ul>
         </section>
       )}

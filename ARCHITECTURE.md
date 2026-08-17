@@ -75,10 +75,15 @@ state), not just the steady state.
   from that friend's own `display_name` (I decide what I call my mom in
   my own app; she doesn't set that; she never sees the nickname either)
 - `lists` — user-defined collections (e.g. "Sunday dinners," "Abe's
-  favorites," "Tokyo trip"); named "Lists" in the UI
-- `recipes` — title, ingredients/steps (jsonb), photo, `tags` (shared
-  suggested cuisine/type list), `prep_time_minutes`, `servings`, `notes`.
-  No `list_id` column — see `list_items` below.
+  favorites," "Tokyo trip"); named "Lists" in the UI. Type-specific
+  (`type` column: `recipe` or `restaurant`) — a recipe list never shows
+  up while organizing a restaurant review, and vice versa.
+- `recipes` — title, ingredients/steps (jsonb), `photo_urls` (array, capped
+  at 5, same "make primary via reordering" pattern as reviews — recipes
+  originally shipped with a single photo, upgraded to match later once
+  reviews proved the pattern out), `tags` (shared suggested cuisine/type
+  list), `prep_time_minutes`, `servings`, `notes`. No `list_id` column —
+  see `list_items` below.
 - `restaurant_reviews` — restaurant name/address/lat/long, rating, tags,
   `review_text` (the write-up) separate from `notes` (quick practical
   tips — same description/notes split as recipes), and `photo_urls`
@@ -166,6 +171,42 @@ browser-history back) wherever the label says "Back" or "Cancel."
 `router.back()` look identical in the UI but mean different things — the
 label "Back" is a promise about *history*, not a promise about a specific
 route, and only one of those two implementations keeps that promise.
+
+**7. Pending friend requests were invisible under RLS — silently**
+Root cause: the `users` SELECT policy only allowed viewing your own
+profile or an *accepted* friend's (`is_friend()` checks `status =
+'accepted'`). A pending request — sent but not yet accepted — falls into
+neither bucket, so RLS silently blocked the requester's profile from
+being visible to the recipient at all. The "Requests" list had a
+fallback (`?? "Someone"`) that masked this completely — it just quietly
+showed "Someone" instead of a real name, with no error, no red flag,
+nothing to notice unless you were specifically testing with two accounts
+mid-request rather than already-accepted ones. Fix: broadened the policy
+to also allow viewing anyone with *any* friendship row (pending or
+accepted) between you and them — a reasonable relaxation, since sending
+an invite code was already a deliberate act.
+*Lesson:* a `?? "fallback"` on a query result can hide an RLS bug
+entirely — it degrades gracefully instead of failing loudly, which is
+good UX and bad debuggability at the same time. Worth specifically
+testing the "not yet accepted" state of anything gated by
+`is_friend()`, not just the steady-state "already friends" case — this
+is the same category of lesson as bug #4, recurring in a new spot.
+
+**8. Button nested inside a Link crashed the page (hydration error)**
+Root cause: during a visual redesign pass, a recipe card got wrapped in
+one big `<Link>` (renders as `<a>`) that included the `FavoriteButton`
+component (renders a `<button>`) inside it. A `<button>` nested inside
+an `<a>` is invalid HTML — browsers handle it inconsistently, and
+React's hydration (matching server-rendered HTML to what the client
+expects) broke badly enough to manifest as a black-screen crash/flicker
+loop rather than a clean error message. Fix: went back to a `<div>`
+wrapper for the card, with `<Link>` only around the specific
+clickable image/title, and the button as a plain sibling outside any
+link.
+*Lesson:* wrapping a whole card in one link is a common shortcut, but
+it's only safe if nothing interactive lives inside that card — the
+moment a card has its own button (favorite, delete, etc.), the link
+has to be scoped down to just the non-interactive parts.
 
 ---
 

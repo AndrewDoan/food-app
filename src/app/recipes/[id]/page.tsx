@@ -23,7 +23,7 @@ export default async function RecipeDetailPage({
   const { data: recipe } = await supabase
     .from("recipes")
     .select(
-      "id, author_id, title, description, ingredients, steps, photo_url, tags, prep_time_minutes, servings, notes, created_at, author:author_id(display_name)"
+      "id, author_id, title, description, ingredients, steps, photo_urls, tags, prep_time_minutes, servings, notes, created_at, author:author_id(display_name)"
     )
     .eq("id", params.id)
     .single();
@@ -34,13 +34,14 @@ export default async function RecipeDetailPage({
 
   const isOwner = recipe.author_id === user?.id;
 
-  let signedPhotoUrl: string | null = null;
-  if (recipe.photo_url) {
-    const { data } = await supabase.storage
-      .from("recipe-photos")
-      .createSignedUrl(recipe.photo_url, 60 * 60);
-    signedPhotoUrl = data?.signedUrl ?? null;
-  }
+  const signedPhotoUrls = await Promise.all(
+    (recipe.photo_urls ?? []).map(async (path: string) => {
+      const { data } = await supabase.storage
+        .from("recipe-photos")
+        .createSignedUrl(path, 60 * 60);
+      return data?.signedUrl ?? null;
+    })
+  );
 
   // Lists this viewer owns -- used to add this recipe (own or a
   // friend's) to any number of their own lists. Only recipe-type lists
@@ -79,13 +80,18 @@ export default async function RecipeDetailPage({
         ← Back
       </Link>
 
-      {signedPhotoUrl && (
-        // eslint-disable-next-line @next/next/no-img-element
-        <img
-          src={signedPhotoUrl}
-          alt={recipe.title}
-          className="w-full max-h-96 object-contain bg-table-950 rounded-lg my-4"
-        />
+      {signedPhotoUrls.filter(Boolean).length > 0 && (
+        <div className="flex gap-2 overflow-x-auto my-4">
+          {signedPhotoUrls.filter(Boolean).map((url, i) => (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              key={i}
+              src={url!}
+              alt={recipe.title}
+              className="h-56 rounded-lg object-cover flex-shrink-0"
+            />
+          ))}
+        </div>
       )}
 
       <div className="flex items-start justify-between gap-3 mt-4 mb-1">
@@ -108,7 +114,7 @@ export default async function RecipeDetailPage({
             </Link>
             <DeleteRecipeButton
               recipeId={recipe.id}
-              photoPath={recipe.photo_url}
+              photoPaths={recipe.photo_urls ?? []}
               redirectTo="/recipes"
             />
           </div>

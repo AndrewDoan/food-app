@@ -6,11 +6,11 @@ import { createClient } from "@/lib/supabase/client";
 
 export default function DeleteRecipeButton({
   recipeId,
-  photoPath,
+  photoPaths,
   redirectTo,
 }: {
   recipeId: string;
-  photoPath: string | null;
+  photoPaths: string[];
   redirectTo?: string;
 }) {
   const router = useRouter();
@@ -21,10 +21,10 @@ export default function DeleteRecipeButton({
     if (!confirm("Delete this recipe? This can't be undone.")) return;
     setDeleting(true);
 
-    // Clean up the stored photo too, so it doesn't linger as an orphaned
-    // file in storage after the recipe row referencing it is gone.
-    if (photoPath) {
-      await supabase.storage.from("recipe-photos").remove([photoPath]);
+    // Clean up the stored photos too, so they don't linger as orphaned
+    // files in storage after the recipe row referencing them is gone.
+    if (photoPaths.length > 0) {
+      await supabase.storage.from("recipe-photos").remove(photoPaths);
     }
 
     const { error } = await supabase.from("recipes").delete().eq("id", recipeId);
