@@ -425,7 +425,7 @@ export default async function RestaurantsPage({
           {(myLists ?? []).map((l) => (
             <Link
               key={l.id}
-              href={buildHref({ list: l.id })}
+              href={buildHref({ list: activeList === l.id ? null : l.id })}
               className={`text-xs px-2.5 py-1 rounded-md ${
                 activeList === l.id ? "text-herb-400 bg-table-800" : "text-table-500"
               }`}
