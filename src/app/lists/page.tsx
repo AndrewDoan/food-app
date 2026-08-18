@@ -23,7 +23,7 @@ export default async function ListsPage() {
     ? await supabase
         .from("list_items")
         .select(
-          "id, list_id, recipe:recipe_id(id, title, prep_time_minutes, photo_url, author_id, author:author_id(display_name)), review:review_id(id, restaurant_name, rating, photo_urls, author_id, author:author_id(display_name))"
+          "id, list_id, recipe:recipe_id(id, title, prep_time_minutes, photo_urls, author_id, author:author_id(display_name)), review:review_id(id, restaurant_name, rating, photo_urls, author_id, author:author_id(display_name))"
         )
         .in("list_id", listIds)
     : { data: [] };
@@ -36,7 +36,7 @@ export default async function ListsPage() {
     .eq("user_id", user.id);
   const nicknameByFriendId = new Map((nicknameRows ?? []).map((n) => [n.friend_id, n.nickname]));
   function authorLabel(authorId: string, realName: string | null) {
-    if (authorId === user.id) return "You";
+    if (authorId === user?.id) return "You";
     return nicknameByFriendId.get(authorId) ?? realName ?? "Someone";
   }
 
@@ -48,10 +48,10 @@ export default async function ListsPage() {
 
       if (i.recipe) {
         let thumbUrl: string | null = null;
-        if (i.recipe.photo_url) {
+        if (i.recipe.photo_urls?.length) {
           const { data } = await supabase.storage
             .from("recipe-photos")
-            .createSignedUrl(i.recipe.photo_url, 60 * 60);
+            .createSignedUrl(i.recipe.photo_urls[0], 60 * 60);
           thumbUrl = data?.signedUrl ?? null;
         }
         arr.push({

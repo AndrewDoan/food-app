@@ -64,7 +64,7 @@ export default function FriendsPage() {
     // Signed URLs for every friend's avatar photo, if they have one --
     // pending requests included now, since RLS allows viewing anyone
     // with any friendship row (see migration_pending_friend_visibility).
-    const relsList = (rels ?? []) as Friendship[];
+    const relsList = (rels ?? []) as unknown as Friendship[];
     const avatarPaths = new Map<string, string>();
     relsList.forEach((f) => {
       const isRequester = f.requester_id === user.id;

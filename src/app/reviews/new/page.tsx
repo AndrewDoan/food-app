@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import PlaceSearch, { type Place } from "./PlaceSearch";
@@ -10,6 +10,14 @@ const MAX_PHOTOS = 5;
 type TagSuggestion = { tag: string; count: number };
 
 export default function NewReviewPage() {
+  return (
+    <Suspense fallback={null}>
+      <NewReviewForm />
+    </Suspense>
+  );
+}
+
+function NewReviewForm() {
   const router = useRouter();
   const supabase = createClient();
   const urlParams = useSearchParams();

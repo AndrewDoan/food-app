@@ -195,7 +195,7 @@ export default async function RestaurantsPage({
   // the most you've engaged with it.
   function reviewTier(r: any): 1 | 2 | 3 | 4 {
     if (myListedReviewIds.has(r.id)) return 1;
-    if (r.author_id === user.id) return 2;
+    if (r.author_id === user?.id) return 2;
     if (myFavoritedReviewIds.has(r.id)) return 3;
     return 4;
   }
