@@ -27,7 +27,9 @@ export default function FriendsPage() {
   const scannerRef = useRef<any>(null);
   const [codeInput, setCodeInput] = useState("");
   const [friendships, setFriendships] = useState<Friendship[]>([]);
-  const [message, setMessage] = useState<string | null>(null);
+  const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(
+    null
+  );
   const [nicknames, setNicknames] = useState<Map<string, string>>(new Map());
   const [avatarUrls, setAvatarUrls] = useState<Map<string, string>>(new Map());
 
@@ -114,7 +116,7 @@ export default function FriendsPage() {
           { facingMode: "environment" },
           { fps: 10, qrbox: 220 },
           (decodedText) => {
-            setCodeInput(decodedText.trim());
+            const code = decodedText.trim();
             // Wait for stop() to fully finish before unmounting the
             // camera view -- calling setScanning(false) too early
             // removes the DOM element the library is still tearing
@@ -127,6 +129,7 @@ export default function FriendsPage() {
               .finally(() => {
                 scannerRef.current = null;
                 setScanning(false);
+                sendFriendRequest(code);
               });
           },
           () => {
@@ -149,21 +152,20 @@ export default function FriendsPage() {
     };
   }, [scanning]);
 
-  async function addByCode(e: React.FormEvent) {
-    e.preventDefault();
+  async function sendFriendRequest(code: string) {
     setMessage(null);
 
     const { data: matchId, error: lookupError } = await supabase.rpc(
       "find_user_by_invite_code",
-      { code: codeInput.trim() }
+      { code: code.trim() }
     );
 
     if (lookupError || !matchId) {
-      setMessage("No one found with that code.");
+      setMessage({ type: "error", text: "No one found with that code." });
       return;
     }
     if (matchId === userId) {
-      setMessage("That's your own code.");
+      setMessage({ type: "error", text: "That's your own code." });
       return;
     }
 
@@ -173,20 +175,33 @@ export default function FriendsPage() {
     });
 
     if (insertError) {
-      setMessage(
-        insertError.message.includes("unique")
+      setMessage({
+        type: "error",
+        text: insertError.message.includes("unique")
           ? "You've already sent a request to this person."
-          : insertError.message
-      );
+          : insertError.message,
+      });
     } else {
-      setMessage("Request sent.");
+      setMessage({ type: "success", text: "Friend request sent!" });
       setCodeInput("");
       loadData();
     }
   }
 
+  async function addByCode(e: React.FormEvent) {
+    e.preventDefault();
+    await sendFriendRequest(codeInput);
+  }
+
   async function respond(id: string, status: "accepted" | "declined") {
     await supabase.from("friendships").update({ status }).eq("id", id);
+    loadData();
+  }
+
+  async function removeFriend(friendshipId: string, name: string) {
+    if (!confirm(`Remove ${name} from your circle? They'll no longer see your recipes or reviews, and you won't see theirs.`))
+      return;
+    await supabase.from("friendships").delete().eq("id", friendshipId);
     loadData();
   }
 
@@ -278,7 +293,19 @@ export default function FriendsPage() {
           Add
         </button>
       </form>
-      {message && <p className="text-sm text-table-400 -mt-6 mb-8">{message}</p>}
+      {message && (
+        <p
+          className={`text-sm -mt-6 mb-8 flex items-center gap-1.5 ${
+            message.type === "success" ? "text-herb-400" : "text-red-400"
+          }`}
+        >
+          <i
+            className={message.type === "success" ? "ti ti-circle-check" : "ti ti-alert-circle"}
+            style={{ fontSize: 14 }}
+          />
+          {message.text}
+        </p>
+      )}
 
       {incoming.length > 0 && (
         <section className="mb-8">
@@ -349,11 +376,11 @@ export default function FriendsPage() {
               const avatarUrl = avatarUrls.get(friendId);
 
               return (
-                <li key={f.id}>
-                  <Link
-                    href={`/people/${friendId}`}
-                    className="flex items-center gap-3 rounded-md bg-table-900 border border-table-700 px-4 py-3 hover:border-table-500 transition-colors"
-                  >
+                <li
+                  key={f.id}
+                  className="flex items-center gap-2 rounded-md bg-table-900 border border-table-700 px-4 py-3 hover:border-table-500 transition-colors"
+                >
+                  <Link href={`/people/${friendId}`} className="flex items-center gap-3 flex-1 min-w-0">
                     {avatarUrl ? (
                       // eslint-disable-next-line @next/next/no-img-element
                       <img
@@ -377,6 +404,14 @@ export default function FriendsPage() {
                       style={{ fontSize: 16, color: "#524b3d" }}
                     />
                   </Link>
+                  <button
+                    onClick={() => removeFriend(f.id, displayLabel ?? "this friend")}
+                    title="Remove friend"
+                    aria-label="Remove friend"
+                    className="w-7 h-7 rounded-full flex items-center justify-center flex-shrink-0 text-table-600 hover:text-red-400 hover:bg-table-950 transition-colors"
+                  >
+                    <i className="ti ti-user-x" style={{ fontSize: 14 }} />
+                  </button>
                 </li>
               );
             })}

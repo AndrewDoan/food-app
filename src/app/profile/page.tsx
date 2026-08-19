@@ -1,11 +1,21 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useEffect, useState, Suspense } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 
 export default function ProfilePage() {
+  return (
+    <Suspense fallback={null}>
+      <ProfileForm />
+    </Suspense>
+  );
+}
+
+function ProfileForm() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const isWelcome = searchParams.get("welcome") === "true";
   const supabase = createClient();
   const [displayName, setDisplayName] = useState("");
   const [avatarPath, setAvatarPath] = useState<string | null>(null);
@@ -88,6 +98,8 @@ export default function ProfilePage() {
     setSaving(false);
     if (error) {
       setMessage(error.message);
+    } else if (isWelcome) {
+      router.push("/recipes");
     } else {
       setMessage("Saved.");
       setAvatarPath(newAvatarPath);
@@ -108,14 +120,26 @@ export default function ProfilePage() {
 
   return (
     <main className="max-w-sm mx-auto px-6 py-12">
-      <button
-        onClick={() => router.back()}
-        className="text-sm text-table-400 hover:text-table-100"
-      >
-        ← Back
-      </button>
+      {!isWelcome && (
+        <button
+          onClick={() => router.back()}
+          className="text-sm text-table-400 hover:text-table-100"
+        >
+          ← Back
+        </button>
+      )}
 
-      <h1 className="font-display text-3xl mt-4 mb-8">Your profile</h1>
+      {isWelcome ? (
+        <div className="mt-4 mb-8">
+          <h1 className="font-display text-3xl mb-1">Welcome to Table 👋</h1>
+          <p className="text-sm text-table-400">
+            What should your friends and family call you? You can add a photo too, or skip it
+            for now.
+          </p>
+        </div>
+      ) : (
+        <h1 className="font-display text-3xl mt-4 mb-8">Your profile</h1>
+      )}
 
       <form onSubmit={handleSubmit} className="space-y-6">
         <div>
@@ -162,7 +186,7 @@ export default function ProfilePage() {
           disabled={saving}
           className="w-full rounded-md bg-herb-600 hover:bg-herb-500 transition-colors px-4 py-3 font-medium disabled:opacity-50"
         >
-          {saving ? "Saving…" : "Save"}
+          {saving ? "Saving…" : isWelcome ? "Continue" : "Save"}
         </button>
 
         {message && (
