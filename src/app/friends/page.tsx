@@ -115,8 +115,19 @@ export default function FriendsPage() {
           { fps: 10, qrbox: 220 },
           (decodedText) => {
             setCodeInput(decodedText.trim());
-            scanner.stop().catch(() => {});
-            setScanning(false);
+            // Wait for stop() to fully finish before unmounting the
+            // camera view -- calling setScanning(false) too early
+            // removes the DOM element the library is still tearing
+            // down the video stream inside, which was throwing a
+            // client-side exception right at the moment of a
+            // successful scan.
+            scanner
+              .stop()
+              .catch(() => {})
+              .finally(() => {
+                scannerRef.current = null;
+                setScanning(false);
+              });
           },
           () => {
             // Fires continuously while no code is found in-frame -- not an error.
