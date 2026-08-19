@@ -108,6 +108,11 @@ function ProfileForm() {
     }
   }
 
+  async function handleSignOut() {
+    await supabase.auth.signOut();
+    router.push("/login");
+  }
+
   if (loading) {
     return (
       <main className="max-w-sm mx-auto px-6 py-12">
@@ -199,6 +204,15 @@ function ProfileForm() {
           </p>
         )}
       </form>
+
+      {!isWelcome && (
+        <button
+          onClick={handleSignOut}
+          className="w-full text-center text-sm text-table-500 hover:text-red-400 mt-8"
+        >
+          Sign out
+        </button>
+      )}
     </main>
   );
 }
