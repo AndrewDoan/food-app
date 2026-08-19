@@ -142,24 +142,23 @@ export default function FriendsPage() {
     e.preventDefault();
     setMessage(null);
 
-    const { data: match, error: lookupError } = await supabase
-      .from("users")
-      .select("id")
-      .eq("invite_code", codeInput.trim())
-      .single();
+    const { data: matchId, error: lookupError } = await supabase.rpc(
+      "find_user_by_invite_code",
+      { code: codeInput.trim() }
+    );
 
-    if (lookupError || !match) {
+    if (lookupError || !matchId) {
       setMessage("No one found with that code.");
       return;
     }
-    if (match.id === userId) {
+    if (matchId === userId) {
       setMessage("That's your own code.");
       return;
     }
 
     const { error: insertError } = await supabase.from("friendships").insert({
       requester_id: userId,
-      addressee_id: match.id,
+      addressee_id: matchId,
     });
 
     if (insertError) {

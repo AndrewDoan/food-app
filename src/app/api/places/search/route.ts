@@ -5,9 +5,25 @@ import { NextResponse } from "next/server";
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const q = searchParams.get("q");
+  const lat = searchParams.get("lat");
+  const lng = searchParams.get("lng");
 
   if (!q || q.trim().length < 2) {
     return NextResponse.json({ places: [] });
+  }
+
+  const body: Record<string, unknown> = { textQuery: q };
+
+  // Bias results toward wherever the person actually is, so searching
+  // "McDonald's" (a name with thousands of locations worldwide) returns
+  // nearby ones first instead of a globally-ranked, essentially random set.
+  if (lat && lng) {
+    body.locationBias = {
+      circle: {
+        center: { latitude: parseFloat(lat), longitude: parseFloat(lng) },
+        radius: 50000, // meters -- Google's max for locationBias
+      },
+    };
   }
 
   const res = await fetch("https://places.googleapis.com/v1/places:searchText", {
@@ -18,7 +34,7 @@ export async function GET(request: Request) {
       "X-Goog-FieldMask":
         "places.id,places.displayName.text,places.formattedAddress,places.location",
     },
-    body: JSON.stringify({ textQuery: q }),
+    body: JSON.stringify(body),
   });
 
   if (!res.ok) {

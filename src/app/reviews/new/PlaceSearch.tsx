@@ -21,7 +21,23 @@ export default function PlaceSearch({
   const [results, setResults] = useState<Place[]>([]);
   const [selected, setSelected] = useState<Place | null>(initialPlace ?? null);
   const [loading, setLoading] = useState(false);
+  const [myLocation, setMyLocation] = useState<{ lat: number; lng: number } | null>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Silently try to get the browser's location once, so a search like
+  // "McDonald's" can be biased toward nearby results instead of
+  // returning a globally-ranked, essentially random set. If permission
+  // is denied or unavailable, search just falls back to unbiased --
+  // never blocks the person from searching either way.
+  useEffect(() => {
+    if (!navigator.geolocation) return;
+    navigator.geolocation.getCurrentPosition(
+      (pos) => setMyLocation({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
+      () => {
+        // Denied or unavailable -- silently proceed without bias.
+      }
+    );
+  }, []);
 
   useEffect(() => {
     if (!query.trim() || selected) {
@@ -32,7 +48,12 @@ export default function PlaceSearch({
     debounceRef.current = setTimeout(async () => {
       setLoading(true);
       try {
-        const res = await fetch(`/api/places/search?q=${encodeURIComponent(query)}`);
+        const params = new URLSearchParams({ q: query });
+        if (myLocation) {
+          params.set("lat", myLocation.lat.toString());
+          params.set("lng", myLocation.lng.toString());
+        }
+        const res = await fetch(`/api/places/search?${params.toString()}`);
         const data = await res.json();
         setResults(data.places ?? []);
       } catch {
@@ -44,7 +65,7 @@ export default function PlaceSearch({
     return () => {
       if (debounceRef.current) clearTimeout(debounceRef.current);
     };
-  }, [query, selected]);
+  }, [query, selected, myLocation]);
 
   function handleSelect(place: Place) {
     setSelected(place);
