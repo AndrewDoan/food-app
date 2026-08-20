@@ -1,9 +1,21 @@
 "use client";
 
-import { useState } from "react";
+import { useState, Suspense } from "react";
+import { useSearchParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 
 export default function LoginPage() {
+  return (
+    <Suspense fallback={null}>
+      <LoginForm />
+    </Suspense>
+  );
+}
+
+function LoginForm() {
+  const searchParams = useSearchParams();
+  const hadAuthError = searchParams.get("error") === "auth";
+
   const [email, setEmail] = useState("");
   const [sent, setSent] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -37,6 +49,14 @@ export default function LoginPage() {
         <p className="text-table-400 mb-8">
           Recipes and spots, from people you actually know. No strangers, no ads.
         </p>
+
+        {hadAuthError && !sent && (
+          <p className="text-sm text-red-400 mb-4 flex items-start gap-1.5">
+            <i className="ti ti-alert-circle" style={{ fontSize: 15, marginTop: 2 }} />
+            That link didn&apos;t work — it may have expired or already been used.
+            Request a new one below.
+          </p>
+        )}
 
         {sent ? (
           <p className="text-herb-400 text-sm">

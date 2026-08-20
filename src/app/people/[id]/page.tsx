@@ -11,7 +11,7 @@ export default async function FriendPage({
   searchParams,
 }: {
   params: { id: string };
-  searchParams: { type?: string; q?: string; tag?: string; list?: string };
+  searchParams: { type?: string; q?: string; tags?: string; list?: string };
 }) {
   const supabase = createClient();
 
@@ -56,7 +56,7 @@ export default async function FriendPage({
   const displayLabel = nickname ?? person.display_name;
 
   const q = searchParams.q ?? "";
-  const activeTag = searchParams.tag ?? "";
+  const activeTags = (searchParams.tags ?? "").split(",").filter(Boolean);
   const activeList = searchParams.list ?? "";
 
   const { data: personLists } = await supabase
@@ -71,7 +71,7 @@ export default async function FriendPage({
     const params = new URLSearchParams();
     if (type !== "recipes") params.set("type", type);
     if (q) params.set("q", q);
-    if (activeTag) params.set("tag", activeTag);
+    if (activeTags.length > 0) params.set("tags", activeTags.join(","));
     if (activeList) params.set("list", activeList);
     for (const [key, value] of Object.entries(overrides)) {
       if (value === null) params.delete(key);
@@ -105,7 +105,7 @@ export default async function FriendPage({
       .eq("author_id", personId)
       .order("created_at", { ascending: false });
 
-    if (activeTag) query = query.contains("tags", [activeTag]);
+    if (activeTags.length > 0) query = query.contains("tags", activeTags);
     if (listFilterRecipeIds) query = query.in("id", listFilterRecipeIds);
     if (q) query = query.or(`title.ilike.%${q}%,tags.cs.{${q}}`);
 
@@ -178,7 +178,7 @@ export default async function FriendPage({
       .eq("author_id", personId)
       .order("created_at", { ascending: false });
 
-    if (activeTag) query = query.contains("tags", [activeTag]);
+    if (activeTags.length > 0) query = query.contains("tags", activeTags);
     if (listFilterReviewIds) query = query.in("id", listFilterReviewIds);
     if (q) query = query.or(`restaurant_name.ilike.%${q}%,tags.cs.{${q}},review_text.ilike.%${q}%`);
 
@@ -328,20 +328,23 @@ export default async function FriendPage({
 
       {topTags.length > 0 && (
         <div className="flex gap-2 mb-6 flex-wrap">
-          {activeTag && (
+          {activeTags.map((t) => (
             <Link
-              href={buildHref({ tag: null })}
+              key={t}
+              href={buildHref({
+                tags: activeTags.filter((x) => x !== t).join(",") || null,
+              })}
               className="text-xs bg-table-800 text-herb-400 px-2.5 py-1 rounded-md"
             >
-              {activeTag} ✕
+              {t} ✕
             </Link>
-          )}
+          ))}
           {topTags
-            .filter(([t]) => t !== activeTag)
+            .filter(([t]) => !activeTags.includes(t))
             .map(([t, count]) => (
               <Link
                 key={t}
-                href={buildHref({ tag: t })}
+                href={buildHref({ tags: [...activeTags, t].join(",") })}
                 className="text-xs border border-table-700 text-table-400 px-2.5 py-1 rounded-md hover:border-table-500"
               >
                 {t} ({count})

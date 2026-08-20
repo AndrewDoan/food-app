@@ -9,7 +9,7 @@ import { haversineMiles } from "@/lib/distance";
 export default async function RestaurantsPage({
   searchParams,
 }: {
-  searchParams: { q?: string; tag?: string; lat?: string; lng?: string; radius?: string; list?: string };
+  searchParams: { q?: string; tags?: string; lat?: string; lng?: string; radius?: string; list?: string };
 }) {
   const supabase = createClient();
 
@@ -19,7 +19,7 @@ export default async function RestaurantsPage({
   if (!user) return null;
 
   const q = searchParams.q ?? "";
-  const activeTag = searchParams.tag ?? "";
+  const activeTags = (searchParams.tags ?? "").split(",").filter(Boolean);
   const activeList = searchParams.list ?? "";
   const myLat = searchParams.lat ? parseFloat(searchParams.lat) : null;
   const myLng = searchParams.lng ? parseFloat(searchParams.lng) : null;
@@ -117,7 +117,7 @@ export default async function RestaurantsPage({
     )
     .order("created_at", { ascending: false });
 
-  if (activeTag) query = query.contains("tags", [activeTag]);
+  if (activeTags.length > 0) query = query.contains("tags", activeTags);
   if (listFilterReviewIds) query = query.in("id", listFilterReviewIds);
   if (q) {
     const orParts = [
@@ -287,7 +287,7 @@ export default async function RestaurantsPage({
   function buildHref(overrides: Record<string, string | null>) {
     const params = new URLSearchParams();
     if (q) params.set("q", q);
-    if (activeTag) params.set("tag", activeTag);
+    if (activeTags.length > 0) params.set("tags", activeTags.join(","));
     if (activeList) params.set("list", activeList);
     if (hasLocation) {
       params.set("lat", myLat!.toString());
@@ -449,20 +449,23 @@ export default async function RestaurantsPage({
 
       {topTags.length > 0 && (
         <div className="flex gap-2 mb-6 flex-wrap">
-          {activeTag && (
+          {activeTags.map((t) => (
             <Link
-              href={buildHref({ tag: null })}
+              key={t}
+              href={buildHref({
+                tags: activeTags.filter((x) => x !== t).join(",") || null,
+              })}
               className="text-xs bg-table-800 text-herb-400 px-2.5 py-1 rounded-md"
             >
-              {activeTag} ✕
+              {t} ✕
             </Link>
-          )}
+          ))}
           {topTags
-            .filter(([t]) => t !== activeTag)
+            .filter(([t]) => !activeTags.includes(t))
             .map(([t, count]) => (
               <Link
                 key={t}
-                href={buildHref({ tag: t })}
+                href={buildHref({ tags: [...activeTags, t].join(",") })}
                 className="text-xs border border-table-700 text-table-400 px-2.5 py-1 rounded-md hover:border-table-500"
               >
                 {t} ({count})

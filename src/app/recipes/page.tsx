@@ -6,7 +6,7 @@ import FavoriteButton from "./[id]/FavoriteButton";
 export default async function RecipesPage({
   searchParams,
 }: {
-  searchParams: { friend?: string; q?: string; tag?: string; list?: string };
+  searchParams: { friend?: string; q?: string; tags?: string; list?: string };
 }) {
   const supabase = createClient();
 
@@ -17,7 +17,7 @@ export default async function RecipesPage({
 
   const friendParam = searchParams.friend ?? "all";
   const q = searchParams.q ?? "";
-  const activeTag = searchParams.tag ?? "";
+  const activeTags = (searchParams.tags ?? "").split(",").filter(Boolean);
   const activeList = searchParams.list ?? "";
 
   // ---- Build the friend selector row --------------------------------
@@ -137,7 +137,7 @@ export default async function RecipesPage({
   }
 
   if (scopeAuthorId) query = query.eq("author_id", scopeAuthorId);
-  if (activeTag) query = query.contains("tags", [activeTag]);
+  if (activeTags.length > 0) query = query.contains("tags", activeTags);
   if (listFilterRecipeIds) query = query.in("id", listFilterRecipeIds);
   if (q) {
     const orParts = [`title.ilike.%${q}%`, `tags.cs.{${q}}`];
@@ -198,7 +198,7 @@ export default async function RecipesPage({
     const params = new URLSearchParams();
     if (q) params.set("q", q);
     if (friendParam !== "all") params.set("friend", friendParam);
-    if (activeTag) params.set("tag", activeTag);
+    if (activeTags.length > 0) params.set("tags", activeTags.join(","));
     if (activeList) params.set("list", activeList);
     for (const [key, value] of Object.entries(overrides)) {
       if (value === null) params.delete(key);
@@ -365,23 +365,28 @@ export default async function RecipesPage({
         </div>
       )}
 
-      {/* Tag chips */}
+      {/* Tag chips -- click to add, click an active one to remove just
+          that one. Multiple active tags narrow results further (a
+          recipe must have ALL selected tags to show). */}
       {topTags.length > 0 && (
         <div className="flex gap-2 mb-6 flex-wrap">
-          {activeTag && (
+          {activeTags.map((t) => (
             <Link
-              href={buildHref({ tag: null })}
+              key={t}
+              href={buildHref({
+                tags: activeTags.filter((x) => x !== t).join(",") || null,
+              })}
               className="text-xs bg-table-800 text-herb-400 px-2.5 py-1 rounded-md"
             >
-              {activeTag} ✕
+              {t} ✕
             </Link>
-          )}
+          ))}
           {topTags
-            .filter(([t]) => t !== activeTag)
+            .filter(([t]) => !activeTags.includes(t))
             .map(([t, count]) => (
               <Link
                 key={t}
-                href={buildHref({ tag: t })}
+                href={buildHref({ tags: [...activeTags, t].join(",") })}
                 className="text-xs border border-table-700 text-table-400 px-2.5 py-1 rounded-md hover:border-table-500"
               >
                 {t} ({count})
