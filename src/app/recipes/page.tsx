@@ -260,6 +260,7 @@ export default async function RecipesPage({
       <div className="flex gap-3 overflow-x-auto pb-1 mb-4">
         <Link
           href={buildHref({ friend: null, list: null })}
+          scroll={false}
           className="flex flex-col items-center gap-1.5 flex-shrink-0"
         >
           <div
@@ -338,6 +339,7 @@ export default async function RecipesPage({
         <div className="flex items-center gap-2 mb-4 border-b border-table-700 pb-3 flex-wrap">
           <Link
             href={buildHref({ list: null })}
+            scroll={false}
             className={`text-xs px-2.5 py-1 rounded-md ${
               !activeList ? "font-medium text-table-100" : "text-table-500"
             }`}
@@ -348,6 +350,7 @@ export default async function RecipesPage({
             <Link
               key={l.id}
               href={buildHref({ list: activeList === l.id ? null : l.id })}
+              scroll={false}
               className={`text-xs px-2.5 py-1 rounded-md ${
                 activeList === l.id ? "text-herb-400 bg-table-800" : "text-table-500"
               }`}
@@ -376,6 +379,7 @@ export default async function RecipesPage({
               href={buildHref({
                 tags: activeTags.filter((x) => x !== t).join(",") || null,
               })}
+              scroll={false}
               className="text-xs bg-table-800 text-herb-400 px-2.5 py-1 rounded-md"
             >
               {t} ✕
@@ -387,6 +391,7 @@ export default async function RecipesPage({
               <Link
                 key={t}
                 href={buildHref({ tags: [...activeTags, t].join(",") })}
+                scroll={false}
                 className="text-xs border border-table-700 text-table-400 px-2.5 py-1 rounded-md hover:border-table-500"
               >
                 {t} ({count})
